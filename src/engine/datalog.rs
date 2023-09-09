@@ -1,63 +1,81 @@
-use datalog_syntax::*;
 use crate::engine::storage::RelationStorage;
+use datalog_syntax::*;
+use crate::evaluation::query::pattern_match;
+use crate::evaluation::semi_naive::semi_naive_evaluation;
+use crate::helpers::helpers::DELTA_PREFIX;
 
 pub struct ChibiRuntime {
-    storage: RelationStorage,
+    processed: RelationStorage,
+    unprocessed_insertions: RelationStorage,
+    unprocessed_deletions: RelationStorage,
     program: Program,
 }
 
 impl ChibiRuntime {
-    fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) {
-        unimplemented!()
+    pub fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) -> bool {
+        self.unprocessed_insertions.insert(relation, ground_atom)
     }
-    /*fn remove(&mut self, query: &Query) {
-        unimplemented!()
-    }
-    fn contains(&self, relation: &str, ground_atom: &GroundAtom) {
-        unimplemented!()
+    /*fn remove(&mut self, query: &Query) -> impl Iterator<Item=AnonymousGroundAtom> {
+        let matches: Vec<_> = self
+            .processed
+            .inner
+            .get(query.symbol)
+            .unwrap()
+            .iter()
+            .filter(|fact| {
+                pattern_match(query, fact)
+            })
+            .collect();
     }*/
-    fn poll() {
-        unimplemented!()
+    pub fn contains(&self, relation: &str, ground_atom: &AnonymousGroundAtom) -> bool {
+        if !self.processed.contains(relation, ground_atom) {
+            return self.unprocessed_insertions.contains(relation, ground_atom)
+        }
+
+        true
     }
-    /*fn query(&self, query: &Query) {
-        unimplemented!()
-    }*/
-    fn new_with_program(program: Vec<Rule>) -> Self {
+    fn query<'a>(&'a self, query: &'a Query) -> impl Iterator<Item=&AnonymousGroundAtom> + '_ {
+        self
+            .processed
+            .inner
+            .get(query.symbol)
+            .unwrap()
+            .iter()
+            .filter(|fact| {
+                pattern_match(query, fact)
+            })
+    }
+    pub fn poll(&mut self) {
+        self
+            .unprocessed_insertions
+            .drain_all_relations()
+            .for_each(|(relation_symbol, unprocessed_facts)| {
+                // We dump all unprocessed EDB relations into delta EDB relations
+                self
+                    .processed
+                    // This clone hurts.
+                    .insert_all(&format!("{}{}", DELTA_PREFIX, relation_symbol), unprocessed_facts.clone().into_iter());
+                // And in their respective place
+                self
+                    .processed
+                    .insert_all(relation_symbol, unprocessed_facts.into_iter())
+            });
+
+        semi_naive_evaluation(&mut self.processed, &self.program, true);
+    }
+    pub fn new(program: Program) -> Self {
+        let processed = Default::default();
+        let unprocessed_insertions = Default::default();
+        let unprocessed_deletions = Default::default();
+
         Self {
-            storage: Default::default(),
+            processed,
+            unprocessed_insertions,
+            unprocessed_deletions,
             program,
         }
     }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::engine::datalog::{RuleEvaluator, RelationStorage};
-    use datalog_rule_macro::rule;
-    use datalog_syntax::*;
-
-    #[test]
-    fn rule() {
-        let mut storage: RelationStorage = Default::default();
-        storage.inner.insert("e".to_string(), Default::default());
-        storage
-            .inner
-            .get_mut("e")
-            .unwrap()
-            .insert(vec!["a".into(), "b".into()]);
-        storage
-            .inner
-            .get_mut("e")
-            .unwrap()
-            .insert(vec!["b".into(), "c".into()]);
-
-        let one_hop = rule! { hop(?x, ?z) <- [e(?x, ?y), e(?y, ?z)] };
-
-        let mut rule_evaluator = RuleEvaluator::new(&storage, &one_hop);
-
-        let expected: Vec<AnonymousGroundAtom> = vec![vec!["a".into(), "c".into()]];
-        let actual: Vec<_> = rule_evaluator.step().collect();
-
-        assert_eq!(expected, actual);
+    pub fn safe(&self) -> bool {
+        self.unprocessed_insertions.len() == 0
     }
 }

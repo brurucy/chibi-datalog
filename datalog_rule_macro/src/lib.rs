@@ -141,3 +141,64 @@ pub fn rule(input: TokenStream) -> TokenStream {
 
     expanded.into()
 }
+
+struct ProgramMacroInput {
+    rules: syn::punctuated::Punctuated<RuleMacroInput, Token![,]>
+}
+
+impl Parse for ProgramMacroInput {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let rules = input.parse_terminated(RuleMacroInput::parse)?;
+        Ok(ProgramMacroInput { rules })
+    }
+}
+
+#[proc_macro]
+pub fn program(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as ProgramMacroInput);
+
+    let rules: Vec<_> = input.rules.into_iter().map(|rule_input| {
+        let head_name = &rule_input.head.name;
+        let head_terms: Vec<_> = rule_input
+            .head
+            .args
+            .iter()
+            .map(|arg| match arg {
+                TermArg::Variable(ident) => quote! { Term::Variable(stringify!(#ident).to_string()) },
+                TermArg::Constant(expr) => quote! { Term::Constant(TypedValue::from(#expr)) },
+            })
+            .collect();
+
+        let body_atoms: Vec<_> = rule_input
+            .body
+            .iter()
+            .map(|atom| {
+                let name = &atom.name;
+                let terms: Vec<_> = atom
+                    .args
+                    .iter()
+                    .map(|arg| match arg {
+                        TermArg::Variable(ident) => {
+                            quote! { Term::Variable(stringify!(#ident).to_string()) }
+                        }
+                        TermArg::Constant(expr) => quote! { Term::Constant(TypedValue::from(#expr)) },
+                    })
+                    .collect();
+                quote! { Atom { terms: vec![#(#terms),*], symbol: stringify!(#name).to_string() } }
+            })
+            .collect();
+
+        quote! {
+            Rule {
+                head: Atom { terms: vec![#(#head_terms),*], symbol: stringify!(#head_name).to_string() },
+                body: vec![#(#body_atoms),*],
+            }
+        }
+    }).collect();
+
+    let expanded = quote! {
+        Program::from( vec![#(#rules),*] )
+    };
+
+    expanded.into()
+}

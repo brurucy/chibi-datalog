@@ -1,6 +1,6 @@
-use datalog_syntax::{AnonymousGroundAtom, Rule};
-use crate::engine::rewrite::Rewrite;
+use crate::engine::rewrite::{unify, Rewrite};
 use crate::engine::storage::RelationStorage;
+use datalog_syntax::{AnonymousGroundAtom, Program, Rule};
 
 pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
@@ -22,7 +22,7 @@ impl<'a> RuleEvaluator<'a> {
     // Doing it depth-first might warrant better results with iterators, since computation
     // would emit facts faster than breadth-first (which defers until all of them are ready to be
     // emitted)
-    fn step(&mut self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
+    pub fn step(&mut self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
         let mut current_rewrites = self.rewrites.clone();
 
         for current_body_atom in self.rule.body.iter() {

@@ -1,11 +1,11 @@
-//use ordered_float::OrderedFloat;
+use ordered_float::OrderedFloat;
 
 #[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Debug, Hash)]
 pub enum TypedValue {
     Str(String),
     Int(usize),
     Bool(bool),
-    //Float(OrderedFloat<f64>),
+    Float(OrderedFloat<f64>),
 }
 
 impl From<String> for TypedValue {
@@ -32,11 +32,11 @@ impl From<bool> for TypedValue {
     }
 }
 
-/*impl From<f64> for TypedValue {
+impl From<f64> for TypedValue {
     fn from(value: f64) -> Self {
         TypedValue::Float(OrderedFloat::from(value))
     }
-}*/
+}
 
 pub type Variable = String;
 
@@ -52,6 +52,43 @@ pub type AnonymousGroundAtom = Vec<TypedValue>;
 pub struct Atom {
     pub terms: Vec<Term>,
     pub symbol: String,
+}
+
+pub enum Matcher {
+    Any,
+    Constant(TypedValue)
+}
+
+pub struct Query<'a> {
+    pub matchers: Vec<Matcher>,
+    pub symbol: &'a str
+}
+
+pub struct QueryBuilder<'a> {
+    query: Query<'a>
+}
+
+impl<'a> QueryBuilder<'a> {
+    fn new(relation: &'a str) -> Self {
+        QueryBuilder {
+            query: Query {
+                matchers: vec![],
+                symbol: relation
+            }
+        }
+    }
+    fn with_any(&mut self) {
+        self.query.matchers.push(Matcher::Any)
+    }
+    fn with_constant(&mut self, value: TypedValue) {
+        self.query.matchers.push(Matcher::Constant(value))
+    }
+}
+
+impl<'a> From<QueryBuilder<'a>> for Query<'a> {
+    fn from(value: QueryBuilder<'a>) -> Self {
+        value.query
+    }
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
