@@ -1,7 +1,7 @@
+use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::DELTA_PREFIX;
 use datalog_syntax::{AnonymousGroundAtom, Program};
 use std::collections::{HashMap, HashSet};
-use crate::evaluation::rule::RuleEvaluator;
 
 pub type FactStorage = HashSet<AnonymousGroundAtom>;
 #[derive(Default)]
@@ -22,15 +22,11 @@ impl RelationStorage {
     pub fn drain_all_relations(
         &mut self,
     ) -> impl Iterator<Item = (&String, Vec<AnonymousGroundAtom>)> + '_ {
-        self
-            .inner
+        self.inner
             .iter_mut()
             .map(|(relation_symbol, facts)| (relation_symbol, facts.drain().collect::<Vec<_>>()))
     }
-    pub fn clear_relation(
-        &mut self,
-        relation_symbol: &str,
-    ) {
+    pub fn clear_relation(&mut self, relation_symbol: &str) {
         self.inner.get_mut(relation_symbol).unwrap().clear();
     }
     pub fn drain_deltas(&mut self) {
@@ -59,55 +55,76 @@ impl RelationStorage {
             });
     }
 
-    pub fn insert_all(&mut self, relation_symbol: &str, facts: impl Iterator<Item = AnonymousGroundAtom>) {
+    pub fn insert_all(
+        &mut self,
+        relation_symbol: &str,
+        facts: impl Iterator<Item = AnonymousGroundAtom>,
+    ) {
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
             relation.extend(facts)
         } else {
             let mut fresh_fact_storage = FactStorage::new();
             fresh_fact_storage.extend(facts);
 
-            self.inner.insert(relation_symbol.to_string(), fresh_fact_storage);
+            self.inner
+                .insert(relation_symbol.to_string(), fresh_fact_storage);
         }
     }
     pub fn insert(&mut self, relation_symbol: &str, ground_atom: AnonymousGroundAtom) -> bool {
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
-            return relation.insert(ground_atom)
+            return relation.insert(ground_atom);
         }
 
         let mut fresh_fact_storage = FactStorage::new();
         fresh_fact_storage.insert(ground_atom);
 
-        self.inner.insert(relation_symbol.to_string(), fresh_fact_storage);
+        self.inner
+            .insert(relation_symbol.to_string(), fresh_fact_storage);
 
         true
     }
     pub fn contains(&self, relation_symbol: &str, ground_atom: &AnonymousGroundAtom) -> bool {
         if let Some(relation) = self.inner.get(relation_symbol) {
-            return relation.contains(ground_atom)
+            return relation.contains(ground_atom);
         }
 
         false
     }
 
     pub fn materialize_delta_program(&mut self, program: &Program) {
-        let evaluation: Vec<_> = program
+        let mut evaluation: Vec<_> = program
             .inner
             .iter()
             .map(|rule| (&rule.head.symbol, RuleEvaluator::new(self, rule)))
-            .map(|(relation, mut rule)| (relation, rule.step().collect::<Vec<_>>()))
+            .map(|(delta_relation_symbol, mut rule)| {
+                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
+            })
             .collect();
 
         evaluation
-            .into_iter()
-            .for_each(|(symbol, facts)| {
-                self.clear_relation(symbol);
-                self.insert_all(symbol, facts.clone().into_iter());
+            .iter_mut()
+            .for_each(|(delta_relation_symbol, _)| {
+                self.clear_relation(delta_relation_symbol);
+            });
 
-                self.insert_all(symbol.strip_prefix(DELTA_PREFIX).unwrap(), facts.clone().into_iter());
+        evaluation
+            .into_iter()
+            .for_each(|(delta_relation_symbol, facts)| {
+                self.insert_all(delta_relation_symbol, facts.clone().into_iter());
+
+                self.insert_all(
+                    delta_relation_symbol.strip_prefix(DELTA_PREFIX).unwrap(),
+                    facts.clone().into_iter(),
+                );
             });
     }
 
     pub fn len(&self) -> usize {
-        return self.inner.iter().filter(|(symbol, _)| !symbol.contains(DELTA_PREFIX)).map(|(_, relation)| relation.len()).sum();
+        return self
+            .inner
+            .iter()
+            .filter(|(symbol, _)| !symbol.contains(DELTA_PREFIX))
+            .map(|(_, relation)| relation.len())
+            .sum();
     }
 }
