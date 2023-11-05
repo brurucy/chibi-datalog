@@ -1,8 +1,15 @@
-use datalog_syntax::{Atom, Program};
+use datalog_syntax::Program;
 
 pub const DELTA_PREFIX: &str = "Δ";
-pub fn deltaify_atom(atom: &mut Atom) {
-    atom.symbol = format!("{}{}", DELTA_PREFIX, atom.symbol)
+pub const OVERDELETION_PREFIX: &str = "delete_";
+pub const REDERIVATION_PREFIX: &str = "rederive_";
+
+pub fn add_prefix(symbol: &mut String, prefix: &str) {
+    *symbol = format!("{}{}", prefix, symbol);
+}
+
+pub fn strip_prefix(symbol: &mut String, prefix: &str) {
+    *symbol = symbol.strip_prefix(prefix).unwrap().to_string();
 }
 
 pub fn split_program(program: Program) -> (Program, Program) {
@@ -29,19 +36,18 @@ pub fn split_program(program: Program) -> (Program, Program) {
 
 #[cfg(test)]
 mod tests {
-    use crate::helpers::helpers::{ split_program };
-    use datalog_rule_macro::{program, rule};
+    use crate::helpers::helpers::split_program;
+    use datalog_rule_macro::program;
     use datalog_syntax::*;
     #[test]
     fn test_split_program() {
-        let program = program! { tc(?x, ?y) <- [e(?x, ?y)],
+        let program = program! {
+            tc(?x, ?y) <- [e(?x, ?y)],
             tc(? x, ?z) <- [e(? x, ?y), tc(? y, ?z)]
         };
 
-        let expected_nonrecursive_program =
-            program! { tc(?x, ?y) <- [e(?x, ?y)] };
-        let expected_recursive_program =
-            program! { tc(?x, ?z) <- [e(?x, ?y), tc(?y, ?z)] };
+        let expected_nonrecursive_program = program! { tc(?x, ?y) <- [e(?x, ?y)] };
+        let expected_recursive_program = program! { tc(?x, ?z) <- [e(?x, ?y), tc(?y, ?z)] };
 
         let (actual_nonrecursive_program, actual_recursive_program) = split_program(program);
 

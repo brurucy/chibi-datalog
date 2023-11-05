@@ -1,6 +1,4 @@
 use crate::engine::storage::RelationStorage;
-use crate::helpers::helpers::{split_program, DELTA_PREFIX};
-use crate::program_transformations::delta_program::make_delta_program;
 use datalog_syntax::Program;
 
 pub fn semi_naive_evaluation(

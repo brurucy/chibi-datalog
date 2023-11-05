@@ -1,11 +1,23 @@
 use ordered_float::OrderedFloat;
+use std::fmt::{Debug, Formatter};
 
-#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Debug, Hash)]
+#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Hash)]
 pub enum TypedValue {
     Str(String),
     Int(usize),
     Bool(bool),
     Float(OrderedFloat<f64>),
+}
+
+impl Debug for TypedValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypedValue::Str(x) => x.fmt(f),
+            TypedValue::Int(x) => x.fmt(f),
+            TypedValue::Bool(x) => x.fmt(f),
+            TypedValue::Float(x) => x.fmt(f),
+        }
+    }
 }
 
 impl From<String> for TypedValue {
@@ -40,47 +52,72 @@ impl From<f64> for TypedValue {
 
 pub type Variable = String;
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
 pub enum Term {
     Variable(String),
     Constant(TypedValue),
 }
 
+impl Debug for Term {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Variable(x) => x.fmt(f),
+            Term::Constant(x) => x.fmt(f),
+        }
+    }
+}
+
 pub type AnonymousGroundAtom = Vec<TypedValue>;
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
 pub struct Atom {
     pub terms: Vec<Term>,
     pub symbol: String,
 }
 
+impl Debug for Atom {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}(", &self.symbol)?;
+
+        for (index, term) in self.terms.iter().enumerate() {
+            write!(f, "{:?}", term)?;
+            // Add comma between terms, but not after the last term
+            if index < self.terms.len() - 1 {
+                write!(f, ", ")?;
+            }
+        }
+
+        write!(f, ")")
+    }
+}
+
 pub enum Matcher {
     Any,
-    Constant(TypedValue)
+    Constant(TypedValue),
 }
 
 pub struct Query<'a> {
     pub matchers: Vec<Matcher>,
-    pub symbol: &'a str
+    pub symbol: &'a str,
 }
 
 pub struct QueryBuilder<'a> {
-    query: Query<'a>
+    query: Query<'a>,
 }
 
 impl<'a> QueryBuilder<'a> {
-    fn new(relation: &'a str) -> Self {
+    pub fn new(relation: &'a str) -> Self {
         QueryBuilder {
             query: Query {
                 matchers: vec![],
-                symbol: relation
-            }
+                symbol: relation,
+            },
         }
     }
-    fn with_any(&mut self) {
-        self.query.matchers.push(Matcher::Any)
+    pub fn with_any(&mut self) {
+        self.query.matchers.push(Matcher::Any);
     }
-    fn with_constant(&mut self, value: TypedValue) {
+    pub fn with_constant(&mut self, value: TypedValue) {
         self.query.matchers.push(Matcher::Constant(value))
     }
 }
@@ -91,19 +128,38 @@ impl<'a> From<QueryBuilder<'a>> for Query<'a> {
     }
 }
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
 pub struct Rule {
     pub head: Atom,
     pub body: Vec<Atom>,
 }
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
+impl Debug for Rule {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", &self.head)?;
+        write!(f, " <- [")?;
+        for (index, atom) in self.body.iter().enumerate() {
+            write!(f, "{:?}", atom)?;
+            // Add comma between terms, but not after the last term
+            if index < self.body.len() - 1 {
+                write!(f, ", ")?;
+            }
+        }
+
+        write!(f, "]")
+    }
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
 pub struct Program {
     pub inner: Vec<Rule>,
 }
 
 impl From<Vec<Rule>> for Program {
     fn from(value: Vec<Rule>) -> Self {
-        Self { inner: value }
+        let mut val = value;
+        val.sort();
+
+        Self { inner: val }
     }
 }

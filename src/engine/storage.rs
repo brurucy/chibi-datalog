@@ -1,5 +1,7 @@
 use crate::evaluation::rule::RuleEvaluator;
-use crate::helpers::helpers::DELTA_PREFIX;
+use crate::helpers::helpers::{
+    strip_prefix, DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX,
+};
 use datalog_syntax::{AnonymousGroundAtom, Program};
 use std::collections::{HashMap, HashSet};
 
@@ -26,8 +28,15 @@ impl RelationStorage {
             .iter_mut()
             .map(|(relation_symbol, facts)| (relation_symbol, facts.drain().collect::<Vec<_>>()))
     }
-    pub fn clear_relation(&mut self, relation_symbol: &str) {
-        self.inner.get_mut(relation_symbol).unwrap().clear();
+    pub fn drain_prefix_filter<'a>(
+        &'a mut self,
+        prefix: &'a str,
+    ) -> impl Iterator<Item = (&String, Vec<AnonymousGroundAtom>)> + '_ {
+        return self
+            .inner
+            .iter_mut()
+            .filter(move |(relation_symbol, _)| relation_symbol.contains(prefix))
+            .map(|(relation_symbol, facts)| (relation_symbol, facts.drain().collect::<Vec<_>>()));
     }
     pub fn drain_deltas(&mut self) {
         let delta_relation_symbols: Vec<_> = self
@@ -53,6 +62,74 @@ impl RelationStorage {
                     });
                 }
             });
+    }
+    pub fn overdelete(&mut self) {
+        let overdeletion_relations: Vec<_> = self
+            .inner
+            .iter()
+            .filter(|(symbol, _)| symbol.contains(OVERDELETION_PREFIX))
+            .map(|(symbol, _)| {
+                (
+                    symbol.clone(),
+                    symbol
+                        .strip_prefix(&OVERDELETION_PREFIX)
+                        .unwrap()
+                        .to_string(),
+                )
+            })
+            .collect();
+
+        overdeletion_relations.into_iter().for_each(
+            |(actual_relation_symbol, overdeletion_symbol)| {
+                let overdeletion_relation = self.inner.remove_entry(&overdeletion_symbol).unwrap();
+                let actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
+
+                overdeletion_relation.1.iter().for_each(|atom| {
+                    actual_relation.remove(atom);
+                });
+
+                // We insert it back because it is necessary for rederivation.
+                self.inner
+                    .insert(overdeletion_relation.0, overdeletion_relation.1);
+            },
+        );
+    }
+    pub fn rederive(&mut self) {
+        let rederivation_relations: Vec<_> = self
+            .inner
+            .iter()
+            .filter(|(symbol, _)| symbol.contains(REDERIVATION_PREFIX))
+            .map(|(symbol, _)| {
+                (
+                    symbol.clone(),
+                    symbol
+                        .strip_prefix(&REDERIVATION_PREFIX)
+                        .unwrap()
+                        .to_string(),
+                )
+            })
+            .collect();
+
+        rederivation_relations.into_iter().for_each(
+            |(actual_relation_symbol, rederivation_symbol)| {
+                let rederivation_relation = self.inner.remove_entry(&rederivation_symbol).unwrap();
+                let actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
+
+                rederivation_relation.1.iter().for_each(|atom| {
+                    actual_relation.remove(atom);
+                });
+            },
+        );
+    }
+    pub fn clear_relation(&mut self, relation_symbol: &str) {
+        self.inner.get_mut(relation_symbol).unwrap().clear();
+    }
+    pub fn clear_prefix(&mut self, prefix: &str) {
+        for (symbol, relation) in self.inner.iter_mut() {
+            if symbol.starts_with(prefix) {
+                relation.clear();
+            }
+        }
     }
 
     pub fn insert_all(
@@ -126,5 +203,9 @@ impl RelationStorage {
             .filter(|(symbol, _)| !symbol.contains(DELTA_PREFIX))
             .map(|(_, relation)| relation.len())
             .sum();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        return self.inner.is_empty();
     }
 }

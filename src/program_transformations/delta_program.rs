@@ -1,55 +1,62 @@
-use datalog_syntax::Program;
-use crate::helpers::helpers::deltaify_atom;
+use crate::helpers::helpers::{add_prefix, DELTA_PREFIX};
+use datalog_syntax::{Program, Rule};
+use std::collections::HashSet;
 
 pub fn make_delta_program(program: &Program, update: bool) -> Program {
-    let idb_relation_symbols: Vec<_> = program.inner.iter().map(|rule| &rule.head.symbol).collect();
+    let idb_relation_symbols: HashSet<_> = program
+        .inner
+        .iter()
+        .map(|rule| rule.head.symbol.clone())
+        .collect();
 
-    let mut delta_program = vec![];
-    program.inner.iter().for_each(|rule| {
-        let mut new_rule = rule.clone();
-        deltaify_atom(&mut new_rule.head);
-        if !rule.body.iter().any(|body_atom| {
-            idb_relation_symbols
-                .iter()
-                .any(|idb_relation_symbol| *idb_relation_symbol == &body_atom.symbol)
-        }) && !update {
-            delta_program.push(new_rule);
+    // Using a HashSet to efficiently check for duplicates during insertion
+    let mut delta_rules_set = HashSet::new();
+
+    for rule in &program.inner {
+        let mut delta_rule = rule.clone();
+        add_prefix(&mut delta_rule.head.symbol, DELTA_PREFIX);
+
+        let contains_idb = rule
+            .body
+            .iter()
+            .any(|atom| idb_relation_symbols.contains(&atom.symbol));
+
+        if !contains_idb && !update {
+            // If the body does not contain any IDB relation symbols and it's not an update phase,
+            // add the delta rule directly to the set.
+            delta_rules_set.insert(delta_rule);
         } else {
-            new_rule
-                .body
-                .iter()
-                .enumerate()
-                .for_each(|(inner_atom_id, body_atom)| {
-                    if update
-                        || idb_relation_symbols
-                        .iter()
-                        .any(|idb_relation| *idb_relation == &body_atom.symbol)
-                    {
-                        let mut new_inner_rule = new_rule.clone();
-                        deltaify_atom(&mut new_inner_rule.body[inner_atom_id]);
-
-                        delta_program.push(new_inner_rule);
-                    }
-                });
+            // Otherwise, consider each body atom and deltaify if necessary.
+            for (index, body_atom) in rule.body.iter().enumerate() {
+                if update || idb_relation_symbols.contains(&body_atom.symbol) {
+                    let mut new_rule = delta_rule.clone();
+                    add_prefix(&mut new_rule.body[index].symbol, DELTA_PREFIX);
+                    delta_rules_set.insert(new_rule);
+                }
+            }
         }
-    });
+    }
 
-    delta_program.dedup();
+    // Convert HashSet back into Vec and construct the Program.
+    // HashSet's into_iter will consume the set and avoid cloning its items.
+    let delta_program: Vec<Rule> = delta_rules_set.into_iter().collect();
 
     Program::from(delta_program)
 }
 
 #[cfg(test)]
 mod test {
-    use datalog_syntax::*;
-    use datalog_rule_macro::*;
     use crate::program_transformations::delta_program::make_delta_program;
+    use datalog_rule_macro::*;
+    use datalog_syntax::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_make_sne_program_nonlinear_update() {
         let program = program! {
             tc(?x, ?y) <- [e(?x, ?y)],
-            tc(?x, ?z) <- [tc(?x, ?y), tc(?y, ?z)] };
+            tc(?x, ?z) <- [tc(?x, ?y), tc(?y, ?z)]
+        };
 
         let actual_program = make_delta_program(&program, true);
         let expected_program = program! {
