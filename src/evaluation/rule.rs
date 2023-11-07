@@ -2,11 +2,11 @@ use crate::engine::rewrite::{unify, Rewrite};
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::{AnonymousGroundAtom, Atom, Rule, Term, TypedValue};
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
     facts_storage: &'a RelationStorage,
-    rewrites: Vec<Rewrite>,
 }
 
 impl<'a> RuleEvaluator<'a> {
@@ -14,7 +14,6 @@ impl<'a> RuleEvaluator<'a> {
         Self {
             rule,
             facts_storage,
-            rewrites: vec![Rewrite::default()],
         }
     }
 }
@@ -65,23 +64,9 @@ fn mask_atom(atom: &Atom) -> MaskedAtom {
     return masked_atom;
 }
 
-fn map_to_terms(atom: &Atom) -> Vec<usize> {
-    let mut out = vec![];
-
-    atom.terms
-        .iter()
-        .enumerate()
-        .for_each(|(idx, term)| match term {
-            Term::Constant(_) => out.push(idx),
-            _ => {}
-        });
-
-    return out;
-}
-
 fn index<'a>(
     unique_column_combinations: &HashMap<String, Vec<Vec<usize>>>,
-    facts_by_relation: &'a HashMap<String, HashSet<AnonymousGroundAtom>>,
+    facts_by_relation: &'a RelationStorage,
     // What the fuck
 ) -> HashMap<String, HashMap<Vec<usize>, HashMap<MaskedAtom<'a>, Vec<&'a AnonymousGroundAtom>>>> {
     let mut results: HashMap<
@@ -95,7 +80,7 @@ fn index<'a>(
         uccs.iter().for_each(|ucc| {
             let current_ucc_entry = current_relation_entry.entry(ucc.clone()).or_default();
 
-            if let Some(facts) = facts_by_relation.get(symbol) {
+            if let Some(facts) = facts_by_relation.inner.get(symbol) {
                 for fact in facts {
                     let mut projected_row = vec![None; fact.len()];
 
@@ -120,11 +105,11 @@ impl<'a> RuleEvaluator<'a> {
     // Doing it depth-first might warrant better results with iterators, since computation
     // would emit facts faster than breadth-first (which defers until all of them are ready to be
     // emitted)
-    pub fn step(&mut self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
+    pub fn step(&self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
         let (uccs, join_key_sequence) = unique_column_combinations(self.rule);
-        let index1 = index(&uccs, &self.facts_storage.inner);
+        let index1 = index(&uccs, &self.facts_storage);
 
-        let mut current_rewrites = self.rewrites.clone();
+        let mut current_rewrites: Vec<Rewrite> = vec![Rewrite::default()];
 
         for (current_body_atom, join_key) in
             self.rule.body.iter().zip(join_key_sequence.into_iter())
@@ -157,7 +142,7 @@ impl<'a> RuleEvaluator<'a> {
                             if let Some(new_rewrite) =
                                 unify(unification_target, current_ground_atom)
                             {
-                                let mut local_rewrite = rewrite.clone().clone();
+                                let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
                                 current_rewrites.push(local_rewrite);
@@ -199,7 +184,7 @@ mod tests {
     }
 
     // #[test]
-    /*fn test_join_and_project_facts() {
+    /*fn test_index() {
         let unique_column_combinations: HashMap<String, Vec<Vec<usize>>> = vec![
             ("relation1".to_string(), vec![vec![0]]), // Project on first column.
             ("relation2".to_string(), vec![vec![1]]), // Project on second column.

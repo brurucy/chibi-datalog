@@ -10,7 +10,7 @@ pub struct RelationStorage {
 }
 
 impl RelationStorage {
-    pub fn get_relation(&self, relation_symbol: &str) -> Option<&HashSet<AnonymousGroundAtom>> {
+    pub fn get_relation(&self, relation_symbol: &str) -> Option<&FactStorage> {
         return self.inner.get(relation_symbol);
     }
     pub fn drain_relation(
@@ -167,20 +167,22 @@ impl RelationStorage {
     }
 
     pub fn materialize_delta_program(&mut self, program: &Program) {
-        let mut evaluation: Vec<_> = program
+        let evaluation: Vec<_> = program
             .inner
             .iter()
             .map(|rule| (&rule.head.symbol, RuleEvaluator::new(self, rule)))
-            .map(|(delta_relation_symbol, mut rule)| {
-                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
-            })
             .collect();
 
-        evaluation
-            .iter_mut()
-            .for_each(|(delta_relation_symbol, _)| {
-                self.clear_relation(delta_relation_symbol);
-            });
+        let evaluation = evaluation
+            .into_iter()
+            .map(|(delta_relation_symbol, rule)| {
+                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>();
+
+        evaluation.iter().for_each(|(delta_relation_symbol, _)| {
+            self.clear_relation(delta_relation_symbol);
+        });
 
         evaluation
             .into_iter()
@@ -189,7 +191,7 @@ impl RelationStorage {
 
                 self.insert_all(
                     delta_relation_symbol.strip_prefix(DELTA_PREFIX).unwrap(),
-                    facts.clone().into_iter(),
+                    facts.into_iter(),
                 );
             });
     }

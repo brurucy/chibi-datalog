@@ -10,6 +10,7 @@ ordered-float = "3.0.0"
 datalog-syntax = { path = "datalog-syntax" }
 datalog_rule_macro = { path = "datalog_rule_macro" }
 crepe = "0.1.8"
+ascent = "*"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"

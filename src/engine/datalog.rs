@@ -27,7 +27,7 @@ impl ChibiRuntime {
     pub fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) -> bool {
         self.unprocessed_insertions.insert(relation, ground_atom)
     }
-    fn remove(&mut self, query: &Query) {
+    pub fn remove(&mut self, query: &Query) {
         self.processed
             .inner
             .get(query.symbol)
@@ -55,7 +55,7 @@ impl ChibiRuntime {
 
         Ok(true)
     }
-    fn query<'a>(
+    pub fn query<'a>(
         &'a self,
         query: &'a Query,
     ) -> Result<impl Iterator<Item = &AnonymousGroundAtom>, String> {
@@ -116,7 +116,7 @@ impl ChibiRuntime {
                         );
                     // And in their respective place
                     self.processed
-                        .insert_all(relation_symbol, unprocessed_facts.into_iter())
+                        .insert_all(relation_symbol, unprocessed_facts.into_iter());
                 },
             );
 
