@@ -91,6 +91,7 @@ impl ChibiRuntime {
             self.processed.drain_deltas();
             self.processed.overdelete();
 
+            // Rederivation is always nonrecursive, and does not require a delta program (I think).
             semi_naive_evaluation(
                 &mut self.processed,
                 &self.nonrecursive_delta_rederivation_program,
@@ -209,7 +210,7 @@ impl ChibiRuntime {
         let (nonrecursive_delta_overdeletion_program, recursive_delta_overdeletion_program) =
             split_program(overdeletion_program);
 
-        let rederivation_program = make_delta_program(&make_overdeletion_program(&program), false);
+        let rederivation_program = make_delta_program(&make_rederivation_program(&program), false);
         let (nonrecursive_delta_rederivation_program, recursive_delta_rederivation_program) =
             split_program(rederivation_program);
 
