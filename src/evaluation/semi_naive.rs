@@ -1,5 +1,6 @@
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::Program;
+use std::time::Instant;
 
 pub fn semi_naive_evaluation(
     fact_storage: &mut RelationStorage,

@@ -102,7 +102,7 @@ pub struct Query<'a> {
 }
 
 pub struct QueryBuilder<'a> {
-    query: Query<'a>,
+    pub query: Query<'a>,
 }
 
 impl<'a> QueryBuilder<'a> {
@@ -126,6 +126,25 @@ impl<'a> From<QueryBuilder<'a>> for Query<'a> {
     fn from(value: QueryBuilder<'a>) -> Self {
         value.query
     }
+}
+
+#[macro_export]
+macro_rules! build_query {
+    ($relation:ident ( $( $matcher:tt ),* $(,)? )) => {{
+        let mut builder = QueryBuilder::new(stringify!($relation));
+        $(
+            // Match the specific token "_"
+            build_query!(@matcher builder, $matcher);
+        )*
+        builder.query
+    }};
+    // Private rules for the macro to handle different matchers
+    (@matcher $builder:expr, _) => {{
+        $builder.with_any();
+    }};
+    (@matcher $builder:expr, $value:expr) => {{
+        $builder.with_constant($value.into());
+    }};
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]

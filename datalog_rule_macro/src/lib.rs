@@ -143,7 +143,7 @@ pub fn rule(input: TokenStream) -> TokenStream {
 }
 
 struct ProgramMacroInput {
-    rules: syn::punctuated::Punctuated<RuleMacroInput, Token![,]>
+    rules: syn::punctuated::Punctuated<RuleMacroInput, Token![,]>,
 }
 
 impl Parse for ProgramMacroInput {

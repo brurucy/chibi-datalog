@@ -1,7 +1,5 @@
 use crate::evaluation::rule::RuleEvaluator;
-use crate::helpers::helpers::{
-    strip_prefix, DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX,
-};
+use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use datalog_syntax::{AnonymousGroundAtom, Program};
 use std::collections::{HashMap, HashSet};
 
@@ -42,14 +40,14 @@ impl RelationStorage {
         let delta_relation_symbols: Vec<_> = self
             .inner
             .keys()
-            .filter(|relation_symbol| relation_symbol.contains(DELTA_PREFIX))
+            .filter(|relation_symbol| relation_symbol.starts_with(DELTA_PREFIX))
             .cloned()
             .collect();
 
         delta_relation_symbols
             .into_iter()
             .for_each(|relation_symbol| {
-                if relation_symbol.contains(DELTA_PREFIX) {
+                if relation_symbol.starts_with(DELTA_PREFIX) {
                     let delta_facts: Vec<_> = self.drain_relation(&relation_symbol).collect();
 
                     let current_non_delta_relation = self
@@ -67,7 +65,7 @@ impl RelationStorage {
         let overdeletion_relations: Vec<_> = self
             .inner
             .iter()
-            .filter(|(symbol, _)| symbol.contains(OVERDELETION_PREFIX))
+            .filter(|(symbol, _)| symbol.starts_with(OVERDELETION_PREFIX))
             .map(|(symbol, _)| {
                 (
                     symbol.clone(),
@@ -80,7 +78,7 @@ impl RelationStorage {
             .collect();
 
         overdeletion_relations.into_iter().for_each(
-            |(actual_relation_symbol, overdeletion_symbol)| {
+            |(overdeletion_symbol, actual_relation_symbol)| {
                 let overdeletion_relation = self.inner.remove_entry(&overdeletion_symbol).unwrap();
                 let actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
 
@@ -98,7 +96,7 @@ impl RelationStorage {
         let rederivation_relations: Vec<_> = self
             .inner
             .iter()
-            .filter(|(symbol, _)| symbol.contains(REDERIVATION_PREFIX))
+            .filter(|(symbol, _)| symbol.starts_with(REDERIVATION_PREFIX))
             .map(|(symbol, _)| {
                 (
                     symbol.clone(),
@@ -111,12 +109,12 @@ impl RelationStorage {
             .collect();
 
         rederivation_relations.into_iter().for_each(
-            |(actual_relation_symbol, rederivation_symbol)| {
+            |(rederivation_symbol, actual_relation_symbol)| {
                 let rederivation_relation = self.inner.remove_entry(&rederivation_symbol).unwrap();
                 let actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
 
-                rederivation_relation.1.iter().for_each(|atom| {
-                    actual_relation.remove(atom);
+                rederivation_relation.1.into_iter().for_each(|atom| {
+                    actual_relation.insert(atom);
                 });
             },
         );
@@ -200,12 +198,12 @@ impl RelationStorage {
         return self
             .inner
             .iter()
-            .filter(|(symbol, _)| !symbol.contains(DELTA_PREFIX))
+            .filter(|(symbol, _)| !symbol.starts_with(DELTA_PREFIX))
             .map(|(_, relation)| relation.len())
             .sum();
     }
 
     pub fn is_empty(&self) -> bool {
-        return self.inner.is_empty();
+        return self.len() == 0;
     }
 }
