@@ -4,6 +4,7 @@ use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use ahash::HashSetExt;
 use datalog_syntax::{AnonymousGroundAtom, Program};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -177,8 +178,10 @@ impl RelationStorage {
         global_uccs: &UniqueColumnCombinations,
     ) {
         let now = Instant::now();
-        let index = Index::new(self, global_uccs);
-        //println!("indexing time: {}", now.elapsed().as_micros());
+
+        let program_local_uccs = ProgramIndex::from(vec![program]);
+        let index = Index::new(self, &program_local_uccs.unique_program_column_combinations);
+        println!("indexing time: {}", now.elapsed().as_micros());
 
         let evaluation: Vec<_> = program
             .inner
@@ -196,7 +199,7 @@ impl RelationStorage {
             .into_iter()
             .map(|(delta_relation_symbol, rule)| (delta_relation_symbol, rule.step()))
             .collect::<Vec<_>>();
-        //println!("evaluation time: {}", now.elapsed().as_micros());
+        println!("evaluation time: {}", now.elapsed().as_micros());
 
         evaluation.iter().for_each(|(delta_relation_symbol, _)| {
             self.clear_relation(delta_relation_symbol);

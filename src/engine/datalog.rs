@@ -236,10 +236,10 @@ impl ChibiRuntime {
         let program_index = ProgramIndex::from(vec![
             &nonrecursive_delta_program,
             &recursive_delta_program,
-            //&nonrecursive_delta_overdeletion_program,
-            //&recursive_delta_overdeletion_program,
-            //&nonrecursive_delta_rederivation_program,
-            //&recursive_delta_rederivation_program,
+            &nonrecursive_delta_overdeletion_program,
+            &recursive_delta_overdeletion_program,
+            &nonrecursive_delta_rederivation_program,
+            &recursive_delta_rederivation_program,
         ]);
 
         Self {

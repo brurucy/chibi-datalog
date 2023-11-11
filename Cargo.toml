@@ -12,6 +12,7 @@ datalog_rule_macro = { path = "datalog_rule_macro" }
 crepe = "0.1.8"
 ascent = "*"
 ahash="0.8.6"
+rayon="1.8.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
