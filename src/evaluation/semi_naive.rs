@@ -1,4 +1,4 @@
-use crate::engine::index::{Index, UniqueColumnCombinations};
+use crate::engine::index::UniqueColumnCombinations;
 use crate::engine::program_index::RuleJoinOrders;
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::Program;

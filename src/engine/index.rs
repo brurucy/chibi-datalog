@@ -36,19 +36,23 @@ fn index<'a>(
         uccs.iter().for_each(|ucc| {
             let current_ucc_entry = current_relation_entry.entry(ucc.clone()).or_default();
 
-            if let Some(facts) = facts_by_relation.inner.get(symbol) {
-                for fact in facts {
-                    let mut projected_row = vec![None; fact.len()];
+            // It is pointless to index empty join keys, since it will just clone the whole relation instead of a column subset
+            if !ucc.is_empty() {
+                if let Some(facts) = facts_by_relation.inner.get(symbol) {
+                    for fact in facts {
+                        let mut projected_row = vec![None; fact.len()];
 
-                    // Perform the projection using the unique columns.
-                    for &column_index in ucc {
-                        if column_index < fact.len() {
-                            projected_row[column_index] = Some(&fact[column_index]);
+                        // Perform the projection using the unique columns.
+                        for &column_index in ucc {
+                            if column_index < fact.len() {
+                                projected_row[column_index] = Some(&fact[column_index]);
+                            }
                         }
-                    }
 
-                    let current_masked_atoms = current_ucc_entry.entry(projected_row).or_default();
-                    current_masked_atoms.push(fact);
+                        let current_masked_atoms =
+                            current_ucc_entry.entry(projected_row).or_default();
+                        current_masked_atoms.push(fact);
+                    }
                 }
             }
         });

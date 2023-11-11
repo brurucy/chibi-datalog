@@ -59,9 +59,14 @@ impl<'a> RuleEvaluator<'a> {
                 .map(|rewrite| (rewrite.apply(current_body_atom), rewrite))
                 .into_iter()
                 .for_each(|(unification_target, rewrite)| {
-                    let masked_atom = mask_atom(&unification_target);
-                    if let Some(matches_by_mask) = matches_by_positions.get(&masked_atom) {
-                        matches_by_mask.iter().for_each(|current_ground_atom| {
+                    // If it is empty, then this is the first body atom.
+                    if join_key.is_empty() {
+                        let current_relation = self
+                            .facts_storage
+                            .get_relation(id_translator.get(&unification_target.symbol).unwrap())
+                            .unwrap();
+
+                        current_relation.iter().for_each(|current_ground_atom| {
                             if let Some(new_rewrite) =
                                 unify(&unification_target, current_ground_atom)
                             {
@@ -71,6 +76,19 @@ impl<'a> RuleEvaluator<'a> {
                                 new_rewrites.push(local_rewrite);
                             };
                         });
+                    } else {
+                        let masked_atom = mask_atom(&unification_target);
+                        if let Some(matches_by_mask) = matches_by_positions.get(&masked_atom) {
+                            matches_by_mask.iter().for_each(|current_ground_atom| {
+                                let new_rewrite =
+                                    unify(&unification_target, current_ground_atom).unwrap();
+
+                                let mut local_rewrite = rewrite.clone();
+                                local_rewrite.extend(new_rewrite);
+
+                                new_rewrites.push(local_rewrite);
+                            });
+                        }
                     }
                 });
 
