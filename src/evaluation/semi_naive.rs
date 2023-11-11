@@ -1,18 +1,19 @@
+use crate::engine::program_index::ProgramIndex;
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::Program;
-use std::time::Instant;
 
 pub fn semi_naive_evaluation(
     fact_storage: &mut RelationStorage,
     nonrecursive_delta_program: &Program,
     recursive_delta_program: &Program,
+    program_index: &ProgramIndex,
 ) {
-    fact_storage.materialize_delta_program(&nonrecursive_delta_program);
+    fact_storage.materialize_delta_program(&nonrecursive_delta_program, program_index);
 
     loop {
         let previous_non_delta_fact_count = fact_storage.len();
 
-        fact_storage.materialize_delta_program(&recursive_delta_program);
+        fact_storage.materialize_delta_program(&recursive_delta_program, program_index);
 
         let current_non_delta_fact_count = fact_storage.len();
 

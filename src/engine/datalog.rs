@@ -1,3 +1,4 @@
+use crate::engine::program_index::ProgramIndex;
 use crate::engine::storage::RelationStorage;
 use crate::evaluation::query::pattern_match;
 use crate::evaluation::semi_naive::semi_naive_evaluation;
@@ -8,7 +9,6 @@ use crate::program_transformations::delta_program::make_delta_program;
 use crate::program_transformations::dred::{make_overdeletion_program, make_rederivation_program};
 use datalog_syntax::*;
 use std::collections::HashSet;
-use std::time::Instant;
 
 pub struct ChibiRuntime {
     processed: RelationStorage,
@@ -21,6 +21,7 @@ pub struct ChibiRuntime {
     recursive_delta_overdeletion_program: Program,
     nonrecursive_delta_rederivation_program: Program,
     recursive_delta_rederivation_program: Program,
+    program_index: ProgramIndex,
 }
 
 impl ChibiRuntime {
@@ -87,6 +88,7 @@ impl ChibiRuntime {
                 &mut self.processed,
                 &self.nonrecursive_delta_overdeletion_program,
                 &self.recursive_delta_overdeletion_program,
+                &self.program_index,
             );
             self.processed.drain_deltas();
             self.processed.overdelete();
@@ -96,6 +98,7 @@ impl ChibiRuntime {
                 &mut self.processed,
                 &self.nonrecursive_delta_rederivation_program,
                 &self.recursive_delta_rederivation_program,
+                &self.program_index,
             );
             self.processed.drain_deltas();
             self.processed.rederive();
@@ -124,6 +127,7 @@ impl ChibiRuntime {
                 &mut self.processed,
                 &self.nonrecursive_delta_program,
                 &self.recursive_delta_program,
+                &self.program_index,
             );
 
             self.processed.drain_deltas()
@@ -214,6 +218,16 @@ impl ChibiRuntime {
         let (nonrecursive_delta_rederivation_program, recursive_delta_rederivation_program) =
             split_program(rederivation_program);
 
+        let program_index = ProgramIndex::from(vec![
+            &program,
+            &nonrecursive_delta_program,
+            &recursive_delta_program,
+            &nonrecursive_delta_overdeletion_program,
+            &recursive_delta_overdeletion_program,
+            &nonrecursive_delta_rederivation_program,
+            &recursive_delta_rederivation_program,
+        ]);
+
         Self {
             processed,
             unprocessed_insertions,
@@ -225,6 +239,7 @@ impl ChibiRuntime {
             recursive_delta_overdeletion_program,
             nonrecursive_delta_rederivation_program,
             recursive_delta_rederivation_program,
+            program_index,
         }
     }
     pub fn safe(&self) -> bool {

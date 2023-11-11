@@ -1,9 +1,11 @@
+use crate::engine::program_index::ProgramIndex;
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
+use ahash::HashSetExt;
 use datalog_syntax::{AnonymousGroundAtom, Program};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-pub type FactStorage = HashSet<AnonymousGroundAtom>;
+pub type FactStorage = ahash::HashSet<AnonymousGroundAtom>;
 #[derive(Default)]
 pub struct RelationStorage {
     pub(crate) inner: HashMap<String, FactStorage>,
@@ -166,18 +168,21 @@ impl RelationStorage {
         false
     }
 
-    pub fn materialize_delta_program(&mut self, program: &Program) {
+    pub fn materialize_delta_program(&mut self, program: &Program, program_index: &ProgramIndex) {
         let evaluation: Vec<_> = program
             .inner
             .iter()
-            .map(|rule| (&rule.head.symbol, RuleEvaluator::new(self, rule)))
+            .map(|rule| {
+                (
+                    &rule.head.symbol,
+                    RuleEvaluator::new(self, rule, program_index),
+                )
+            })
             .collect();
 
         let evaluation = evaluation
             .into_iter()
-            .map(|(delta_relation_symbol, rule)| {
-                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
-            })
+            .map(|(delta_relation_symbol, rule)| (delta_relation_symbol, rule.step()))
             .collect::<Vec<_>>();
 
         evaluation.iter().for_each(|(delta_relation_symbol, _)| {

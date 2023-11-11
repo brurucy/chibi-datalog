@@ -151,6 +151,7 @@ macro_rules! build_query {
 pub struct Rule {
     pub head: Atom,
     pub body: Vec<Atom>,
+    pub id: usize,
 }
 
 impl Debug for Rule {
@@ -178,6 +179,10 @@ impl From<Vec<Rule>> for Program {
     fn from(value: Vec<Rule>) -> Self {
         let mut val = value;
         val.sort();
+        // Questionable, I know :)
+        for (id, rule) in val.iter_mut().enumerate() {
+            (*rule).id = id;
+        }
 
         Self { inner: val }
     }
