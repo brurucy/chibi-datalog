@@ -180,10 +180,13 @@ impl RelationStorage {
         let now = Instant::now();
 
         let program_local_uccs = ProgramIndex::from(vec![program]);
-        let index = Index::new(self, &program_local_uccs.unique_program_column_combinations);
+        let index = Index::new(
+            &self,
+            &program_local_uccs.unique_program_column_combinations,
+        );
         println!("indexing time: {}", now.elapsed().as_micros());
 
-        let evaluation: Vec<_> = program
+        let evaluation_setup: Vec<_> = program
             .inner
             .iter()
             .map(|rule| {
@@ -195,9 +198,11 @@ impl RelationStorage {
             .collect();
 
         let now = Instant::now();
-        let evaluation = evaluation
+        let evaluation = evaluation_setup
             .into_iter()
-            .map(|(delta_relation_symbol, rule)| (delta_relation_symbol, rule.step()))
+            .map(|(delta_relation_symbol, rule)| {
+                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
+            })
             .collect::<Vec<_>>();
         println!("evaluation time: {}", now.elapsed().as_micros());
 

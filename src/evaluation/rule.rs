@@ -2,8 +2,9 @@ use crate::engine::index::{mask_atom, Index};
 use crate::engine::program_index::JoinOrder;
 use crate::engine::rewrite::{intern_rule, unify, Rewrite};
 use crate::engine::storage::RelationStorage;
-use ascent::rayon;
 use datalog_syntax::{AnonymousGroundAtom, Rule};
+use std::time;
+use time::Instant;
 
 pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
@@ -32,7 +33,7 @@ impl<'a> RuleEvaluator<'a> {
     // Doing it depth-first might warrant better results with iterators, since computation
     // would emit facts faster than breadth-first (which defers until all of them are ready to be
     // emitted)
-    pub fn step(&self) -> Vec<AnonymousGroundAtom> {
+    pub fn step(&self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
         let join_sequence = self.join_order;
 
         //let mut now = Instant::now();
@@ -97,7 +98,6 @@ impl<'a> RuleEvaluator<'a> {
 
         current_rewrites
             .into_iter()
-            .map(|rewrite| rewrite.ground(&interned_rule.head))
-            .collect::<Vec<_>>()
+            .map(move |rewrite| rewrite.ground(&interned_rule.head))
     }
 }

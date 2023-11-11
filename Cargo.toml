@@ -13,6 +13,7 @@ crepe = "0.1.8"
 ascent = "*"
 ahash="0.8.6"
 rayon="1.8.0"
+dashmap="5.5.3"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
