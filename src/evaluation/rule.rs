@@ -1,5 +1,5 @@
 use crate::engine::index::{mask_atom, Index};
-use crate::engine::program_index::ProgramIndex;
+use crate::engine::program_index::JoinOrder;
 use crate::engine::rewrite::{intern_rule, unify, Rewrite};
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::{AnonymousGroundAtom, Rule};
@@ -7,19 +7,22 @@ use datalog_syntax::{AnonymousGroundAtom, Rule};
 pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
     facts_storage: &'a RelationStorage,
-    program_index: &'a ProgramIndex,
+    join_order: &'a JoinOrder,
+    index: &'a Index<'a>,
 }
 
 impl<'a> RuleEvaluator<'a> {
     pub(crate) fn new(
         facts_storage: &'a RelationStorage,
         rule: &'a Rule,
-        program_index: &'a ProgramIndex,
+        join_order: &'a JoinOrder,
+        index: &'a Index,
     ) -> Self {
         Self {
             rule,
             facts_storage,
-            program_index,
+            join_order,
+            index,
         }
     }
 }
@@ -29,25 +32,21 @@ impl<'a> RuleEvaluator<'a> {
     // would emit facts faster than breadth-first (which defers until all of them are ready to be
     // emitted)
     pub fn step(&self) -> Vec<AnonymousGroundAtom> {
-        let join_sequence = self
-            .program_index
-            .binding_guided_join_order
-            .get(&self.rule.id)
-            .unwrap();
+        let join_sequence = self.join_order;
 
-        let index = Index::new(
-            self.facts_storage,
-            &self.program_index.unique_program_column_combinations,
-        );
+        //let mut now = Instant::now();
+        //let index = Index::new(self.facts_storage, &self.global_uccs);
+        //println!("indexing time: {}", now.elapsed().as_micros());
         let (interned_rule, id_translator) = intern_rule(self.rule.clone());
 
-        // Perhaps a trie is warranted. A very limited kind of trie however.
+        // Perhaps a trie is warranted. There is a lot of repetition
         let mut current_rewrites: Vec<Rewrite> = vec![Rewrite::default()];
 
         for (current_body_atom, join_key) in
             interned_rule.body.iter().zip(join_sequence.into_iter())
         {
-            let matches_by_symbol = index
+            let matches_by_symbol = self
+                .index
                 .inner
                 .get(id_translator.get(&current_body_atom.symbol).unwrap())
                 .unwrap();

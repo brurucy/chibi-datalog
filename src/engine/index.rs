@@ -1,7 +1,9 @@
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
-use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
-use datalog_syntax::{AnonymousGroundAtom, Program, Rule, Term, TypedValue};
+use ahash::{HashMap, HashMapExt};
+use datalog_syntax::{AnonymousGroundAtom, TypedValue};
+
+pub type UniqueColumnCombinations = HashMap<String, Vec<Vec<usize>>>;
 pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
 
 pub fn mask_atom(atom: &InternedAtom) -> MaskedAtom {

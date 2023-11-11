@@ -1,9 +1,11 @@
-use crate::engine::program_index::ProgramIndex;
+use crate::engine::index::{Index, UniqueColumnCombinations};
+use crate::engine::program_index::{ProgramIndex, RuleJoinOrders};
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use ahash::HashSetExt;
 use datalog_syntax::{AnonymousGroundAtom, Program};
 use std::collections::HashMap;
+use std::time::Instant;
 
 pub type FactStorage = ahash::HashSet<AnonymousGroundAtom>;
 #[derive(Default)]
@@ -168,27 +170,39 @@ impl RelationStorage {
         false
     }
 
-    pub fn materialize_delta_program(&mut self, program: &Program, program_index: &ProgramIndex) {
+    pub fn materialize_delta_program(
+        &mut self,
+        program: &Program,
+        rule_join_orders: &RuleJoinOrders,
+        global_uccs: &UniqueColumnCombinations,
+    ) {
+        let now = Instant::now();
+        let index = Index::new(self, global_uccs);
+        //println!("indexing time: {}", now.elapsed().as_micros());
+
         let evaluation: Vec<_> = program
             .inner
             .iter()
             .map(|rule| {
                 (
                     &rule.head.symbol,
-                    RuleEvaluator::new(self, rule, program_index),
+                    RuleEvaluator::new(self, rule, rule_join_orders.get(&rule.id).unwrap(), &index),
                 )
             })
             .collect();
 
+        let now = Instant::now();
         let evaluation = evaluation
             .into_iter()
             .map(|(delta_relation_symbol, rule)| (delta_relation_symbol, rule.step()))
             .collect::<Vec<_>>();
+        //println!("evaluation time: {}", now.elapsed().as_micros());
 
         evaluation.iter().for_each(|(delta_relation_symbol, _)| {
             self.clear_relation(delta_relation_symbol);
         });
 
+        let now = Instant::now();
         evaluation
             .into_iter()
             .for_each(|(delta_relation_symbol, facts)| {
@@ -199,6 +213,7 @@ impl RelationStorage {
                     facts.into_iter(),
                 );
             });
+        //println!("postsert time: {}", now.elapsed().as_micros());
     }
 
     pub fn len(&self) -> usize {

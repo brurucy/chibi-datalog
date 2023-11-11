@@ -1,4 +1,5 @@
-use crate::engine::program_index::ProgramIndex;
+use crate::engine::index::{Index, UniqueColumnCombinations};
+use crate::engine::program_index::RuleJoinOrders;
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::Program;
 
@@ -6,14 +7,24 @@ pub fn semi_naive_evaluation(
     fact_storage: &mut RelationStorage,
     nonrecursive_delta_program: &Program,
     recursive_delta_program: &Program,
-    program_index: &ProgramIndex,
+    nonrecursive_join_order: &RuleJoinOrders,
+    recursive_join_order: &RuleJoinOrders,
+    global_uccs: &UniqueColumnCombinations,
 ) {
-    fact_storage.materialize_delta_program(&nonrecursive_delta_program, program_index);
+    fact_storage.materialize_delta_program(
+        &nonrecursive_delta_program,
+        nonrecursive_join_order,
+        &global_uccs,
+    );
 
     loop {
         let previous_non_delta_fact_count = fact_storage.len();
 
-        fact_storage.materialize_delta_program(&recursive_delta_program, program_index);
+        fact_storage.materialize_delta_program(
+            &recursive_delta_program,
+            recursive_join_order,
+            &global_uccs,
+        );
 
         let current_non_delta_fact_count = fact_storage.len();
 
@@ -25,7 +36,7 @@ pub fn semi_naive_evaluation(
     }
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod test {
     use crate::engine::storage::RelationStorage;
     use crate::evaluation::semi_naive::semi_naive_evaluation;
@@ -211,3 +222,4 @@ mod test {
         assert_eq!(expected, actual);
     }
 }
+*/

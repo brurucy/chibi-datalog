@@ -133,12 +133,10 @@ macro_rules! build_query {
     ($relation:ident ( $( $matcher:tt ),* $(,)? )) => {{
         let mut builder = QueryBuilder::new(stringify!($relation));
         $(
-            // Match the specific token "_"
             build_query!(@matcher builder, $matcher);
         )*
         builder.query
     }};
-    // Private rules for the macro to handle different matchers
     (@matcher $builder:expr, _) => {{
         $builder.with_any();
     }};
@@ -160,7 +158,6 @@ impl Debug for Rule {
         write!(f, " <- [")?;
         for (index, atom) in self.body.iter().enumerate() {
             write!(f, "{:?}", atom)?;
-            // Add comma between terms, but not after the last term
             if index < self.body.len() - 1 {
                 write!(f, ", ")?;
             }

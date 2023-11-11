@@ -10,6 +10,7 @@ use crate::program_transformations::dred::{make_overdeletion_program, make_reder
 use datalog_syntax::*;
 use std::collections::HashSet;
 
+// Hairy
 pub struct ChibiRuntime {
     processed: RelationStorage,
     unprocessed_insertions: RelationStorage,
@@ -73,6 +74,8 @@ impl ChibiRuntime {
             .filter(|fact| pattern_match(query, fact)))
     }
     pub fn poll(&mut self) {
+        let global_uccs = &self.program_index.unique_program_column_combinations;
+
         if !self.unprocessed_deletions.is_empty() {
             self.unprocessed_deletions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
@@ -84,21 +87,29 @@ impl ChibiRuntime {
                 },
             );
 
+            let nonrecursive_delta_overdeletion_join_orders = self.program_index.get_join_orders(2);
+            let recursive_delta_overdeletion_join_orders = self.program_index.get_join_orders(3);
             semi_naive_evaluation(
                 &mut self.processed,
                 &self.nonrecursive_delta_overdeletion_program,
                 &self.recursive_delta_overdeletion_program,
-                &self.program_index,
+                nonrecursive_delta_overdeletion_join_orders,
+                recursive_delta_overdeletion_join_orders,
+                global_uccs,
             );
             self.processed.drain_deltas();
             self.processed.overdelete();
 
             // Rederivation is always nonrecursive, and does not require a delta program (I think).
+            let nonrecursive_delta_rederivation_join_orders = self.program_index.get_join_orders(4);
+            let recursive_delta_rederivation_join_orders = self.program_index.get_join_orders(5);
             semi_naive_evaluation(
                 &mut self.processed,
                 &self.nonrecursive_delta_rederivation_program,
                 &self.recursive_delta_rederivation_program,
-                &self.program_index,
+                nonrecursive_delta_rederivation_join_orders,
+                recursive_delta_rederivation_join_orders,
+                global_uccs,
             );
             self.processed.drain_deltas();
             self.processed.rederive();
@@ -123,11 +134,15 @@ impl ChibiRuntime {
                 },
             );
 
+            let nonrecursive_delta_join_orders = self.program_index.get_join_orders(0);
+            let recursive_delta_join_orders = self.program_index.get_join_orders(1);
             semi_naive_evaluation(
                 &mut self.processed,
                 &self.nonrecursive_delta_program,
                 &self.recursive_delta_program,
-                &self.program_index,
+                nonrecursive_delta_join_orders,
+                recursive_delta_join_orders,
+                global_uccs,
             );
 
             self.processed.drain_deltas()
@@ -219,13 +234,12 @@ impl ChibiRuntime {
             split_program(rederivation_program);
 
         let program_index = ProgramIndex::from(vec![
-            &program,
             &nonrecursive_delta_program,
             &recursive_delta_program,
-            &nonrecursive_delta_overdeletion_program,
-            &recursive_delta_overdeletion_program,
-            &nonrecursive_delta_rederivation_program,
-            &recursive_delta_rederivation_program,
+            //&nonrecursive_delta_overdeletion_program,
+            //&recursive_delta_overdeletion_program,
+            //&nonrecursive_delta_rederivation_program,
+            //&recursive_delta_rederivation_program,
         ]);
 
         Self {
