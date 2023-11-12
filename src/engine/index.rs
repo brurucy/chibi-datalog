@@ -1,6 +1,6 @@
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
-use ahash::{AHasher, HashMap, HashMapExt};
+use ahash::{AHasher, HashMap, HashMapExt, HashSet};
 use datalog_syntax::{AnonymousGroundAtom, TypedValue};
 use std::hash::{Hash, Hasher};
 
@@ -31,7 +31,7 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
 }
 
 pub type IndexedRepresentation<'a> =
-    HashMap<String, HashMap<Vec<usize>, HashMap<usize, Vec<&'a AnonymousGroundAtom>>>>;
+    HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<&'a AnonymousGroundAtom>>>>;
 
 fn index<'a>(
     unique_column_combinations: &HashMap<String, Vec<Vec<usize>>>,
@@ -60,7 +60,7 @@ fn index<'a>(
                         let current_masked_atoms = current_ucc_entry
                             .entry(hashisher(projected_row))
                             .or_default();
-                        current_masked_atoms.push(fact);
+                        current_masked_atoms.insert(fact);
                     }
                 }
             }

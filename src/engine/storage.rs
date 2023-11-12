@@ -4,6 +4,7 @@ use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use ahash::{HashMap, HashSet, HashSetExt};
 use datalog_syntax::{AnonymousGroundAtom, Program};
+use rayon::prelude::*;
 use std::time::Instant;
 
 pub type FactStorage = HashSet<AnonymousGroundAtom>;

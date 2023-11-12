@@ -3,8 +3,6 @@ use crate::engine::program_index::JoinOrder;
 use crate::engine::rewrite::{intern_rule, unify, Rewrite};
 use crate::engine::storage::RelationStorage;
 use datalog_syntax::{AnonymousGroundAtom, Rule};
-use std::time;
-use time::Instant;
 
 pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
@@ -55,9 +53,8 @@ impl<'a> RuleEvaluator<'a> {
             current_rewrites
                 .drain(..)
                 .map(|rewrite| (rewrite.apply(current_body_atom), rewrite))
-                .into_iter()
                 .for_each(|(unification_target, rewrite)| {
-                    // If it is empty, then this is the first body atom.
+                    // If it is empty, then this is the first body atom. In this case, do a join.
                     if join_key.is_empty() {
                         let current_relation = self
                             .facts_storage
@@ -71,6 +68,7 @@ impl<'a> RuleEvaluator<'a> {
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
+                                //new_rewrites.push(local_rewrite);
                                 new_rewrites.push(local_rewrite);
                             };
                         });
@@ -84,13 +82,14 @@ impl<'a> RuleEvaluator<'a> {
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
+                                //new_rewrites.push(local_rewrite);
                                 new_rewrites.push(local_rewrite);
                             });
                         }
                     }
                 });
 
-            current_rewrites = new_rewrites;
+            current_rewrites = new_rewrites.into_iter().collect();
         }
 
         current_rewrites
