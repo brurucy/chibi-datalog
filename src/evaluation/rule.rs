@@ -36,9 +36,6 @@ impl<'a> RuleEvaluator<'a> {
     pub fn step(&self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
         let join_sequence = self.join_order;
 
-        //let mut now = Instant::now();
-        //let index = Index::new(self.facts_storage, &self.global_uccs);
-        //println!("indexing time: {}", now.elapsed().as_micros());
         let (interned_rule, id_translator) = intern_rule(self.rule.clone());
 
         // Perhaps a trie is warranted. There is a lot of repetition

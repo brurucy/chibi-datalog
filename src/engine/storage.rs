@@ -2,13 +2,11 @@ use crate::engine::index::{Index, UniqueColumnCombinations};
 use crate::engine::program_index::{ProgramIndex, RuleJoinOrders};
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
-use ahash::HashSetExt;
+use ahash::{HashMap, HashSet, HashSetExt};
 use datalog_syntax::{AnonymousGroundAtom, Program};
-use rayon::prelude::*;
-use std::collections::HashMap;
 use std::time::Instant;
 
-pub type FactStorage = ahash::HashSet<AnonymousGroundAtom>;
+pub type FactStorage = HashSet<AnonymousGroundAtom>;
 #[derive(Default)]
 pub struct RelationStorage {
     pub(crate) inner: HashMap<String, FactStorage>,
@@ -210,7 +208,6 @@ impl RelationStorage {
             self.clear_relation(delta_relation_symbol);
         });
 
-        let now = Instant::now();
         evaluation
             .into_iter()
             .for_each(|(delta_relation_symbol, facts)| {
@@ -221,7 +218,6 @@ impl RelationStorage {
                     facts.into_iter(),
                 );
             });
-        //println!("postsert time: {}", now.elapsed().as_micros());
     }
 
     pub fn len(&self) -> usize {

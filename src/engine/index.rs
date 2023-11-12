@@ -1,12 +1,22 @@
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
-use ahash::{HashMap, HashMapExt};
+use ahash::{AHasher, HashMap, HashMapExt};
 use datalog_syntax::{AnonymousGroundAtom, TypedValue};
+use std::hash::{Hash, Hasher};
 
 pub type UniqueColumnCombinations = HashMap<String, Vec<Vec<usize>>>;
 pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
 
-pub fn mask_atom(atom: &InternedAtom) -> MaskedAtom {
+fn hashisher<K: Hash>(key: K) -> usize {
+    let mut hasher = AHasher::default();
+    key.hash(&mut hasher);
+    let hashed_key = hasher.finish();
+
+    hashed_key as usize
+}
+
+pub fn mask_atom(atom: &InternedAtom) -> usize {
+    //MaskedAtom {
     let mut masked_atom = Vec::new();
 
     atom.terms
@@ -17,20 +27,18 @@ pub fn mask_atom(atom: &InternedAtom) -> MaskedAtom {
         })
         .for_each(|masked_value| masked_atom.push(masked_value));
 
-    return masked_atom;
+    return hashisher(masked_atom);
 }
+
+pub type IndexedRepresentation<'a> =
+    HashMap<String, HashMap<Vec<usize>, HashMap<usize, Vec<&'a AnonymousGroundAtom>>>>;
 
 fn index<'a>(
     unique_column_combinations: &HashMap<String, Vec<Vec<usize>>>,
     facts_by_relation: &'a RelationStorage,
-    // What the fuck
-) -> HashMap<String, HashMap<Vec<usize>, HashMap<MaskedAtom<'a>, Vec<&'a AnonymousGroundAtom>>>> {
-    let mut results: HashMap<
-        String,
-        HashMap<Vec<usize>, HashMap<MaskedAtom<'a>, Vec<&'a AnonymousGroundAtom>>>,
-    > = HashMap::new();
+) -> IndexedRepresentation<'a> {
+    let mut results: IndexedRepresentation<'a> = HashMap::new();
 
-    // Iterate over each unique column combination.
     for (symbol, uccs) in unique_column_combinations.iter() {
         let current_relation_entry = results.entry(symbol.clone()).or_default();
         uccs.iter().for_each(|ucc| {
@@ -49,8 +57,9 @@ fn index<'a>(
                             }
                         }
 
-                        let current_masked_atoms =
-                            current_ucc_entry.entry(projected_row).or_default();
+                        let current_masked_atoms = current_ucc_entry
+                            .entry(hashisher(projected_row))
+                            .or_default();
                         current_masked_atoms.push(fact);
                     }
                 }
@@ -62,8 +71,7 @@ fn index<'a>(
 }
 
 pub struct Index<'a> {
-    pub inner:
-        HashMap<String, HashMap<Vec<usize>, HashMap<MaskedAtom<'a>, Vec<&'a AnonymousGroundAtom>>>>,
+    pub inner: IndexedRepresentation<'a>,
 }
 
 impl<'a> Index<'a> {
