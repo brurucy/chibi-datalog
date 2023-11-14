@@ -1,26 +1,22 @@
+use crate::engine::program_index::UniqueColumnCombinations;
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
 use ahash::{AHasher, HashMap, HashMapExt, HashSet};
 use datalog_syntax::{AnonymousGroundAtom, TypedValue};
 use std::hash::{Hash, Hasher};
 
-pub type UniqueColumnCombinations = HashMap<String, Vec<Vec<usize>>>;
 pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
 
 fn hashisher<K: Hash>(key: &Vec<K>) -> usize {
     let mut hasher = AHasher::default();
 
     key.iter()
-        //.for_each(|masked_value| masked_atom.push(masked_value));
         .for_each(|masked_value| masked_value.hash(&mut hasher));
 
     hasher.finish() as usize
 }
 
 pub fn mask_atom(atom: &InternedAtom) -> usize {
-    //MaskedAtom {
-    //let mut masked_atom = Vec::new();
-
     let mut hasher = AHasher::default();
 
     atom.terms
@@ -29,7 +25,6 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
             InternedTerm::Constant(value) => Some(value),
             _ => None,
         })
-        //.for_each(|masked_value| masked_atom.push(masked_value));
         .for_each(|masked_value| masked_value.hash(&mut hasher));
 
     hasher.finish() as usize
@@ -39,7 +34,7 @@ pub type IndexedRepresentation<'a> =
     HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<&'a AnonymousGroundAtom>>>>;
 
 fn index<'a>(
-    unique_column_combinations: &HashMap<String, Vec<Vec<usize>>>,
+    unique_column_combinations: &UniqueColumnCombinations,
     facts_by_relation: &'a RelationStorage,
 ) -> IndexedRepresentation<'a> {
     let mut results: IndexedRepresentation<'a> = HashMap::new();
@@ -102,10 +97,7 @@ pub struct Index<'a> {
 }
 
 impl<'a> Index<'a> {
-    pub fn new(
-        relation_storage: &'a RelationStorage,
-        uccs: &HashMap<String, Vec<Vec<usize>>>,
-    ) -> Self {
+    pub fn new(relation_storage: &'a RelationStorage, uccs: &UniqueColumnCombinations) -> Self {
         let inner = index(&uccs, relation_storage);
 
         return Self { inner };

@@ -1,5 +1,5 @@
-use crate::engine::index::{Index, UniqueColumnCombinations};
-use crate::engine::program_index::{ProgramIndex, RuleJoinOrders};
+use crate::engine::index::Index;
+use crate::engine::program_index::{ProgramIndex, RuleJoinOrders, UniqueColumnCombinations};
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use ahash::{HashMap, HashSet, HashSetExt};
@@ -200,23 +200,28 @@ impl RelationStorage {
         let evaluation = evaluation_setup
             .into_iter()
             .map(|(delta_relation_symbol, rule)| {
-                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
+                (delta_relation_symbol, rule.step().collect::<HashSet<_>>())
             })
             .collect::<Vec<_>>();
         println!("evaluation time: {}", now.elapsed().as_micros());
 
-        evaluation.iter().for_each(|(delta_relation_symbol, _)| {
-            self.clear_relation(delta_relation_symbol);
-        });
+        evaluation
+            .iter()
+            .for_each(|(delta_relation_symbol, _)| self.clear_relation(delta_relation_symbol));
 
         evaluation
             .into_iter()
-            .for_each(|(delta_relation_symbol, facts)| {
-                self.insert_all(delta_relation_symbol, facts.clone().into_iter());
+            .for_each(|(delta_relation_symbol, current_delta_evaluation)| {
+                let diff: Vec<_> = current_delta_evaluation
+                    .difference(self.get_relation(delta_relation_symbol).unwrap())
+                    .cloned()
+                    .collect();
+
+                self.insert_all(delta_relation_symbol, diff.clone().into_iter());
 
                 self.insert_all(
                     delta_relation_symbol.strip_prefix(DELTA_PREFIX).unwrap(),
-                    facts.into_iter(),
+                    diff.into_iter(),
                 );
             });
     }
