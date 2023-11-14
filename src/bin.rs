@@ -160,10 +160,4 @@ fn main() {
     ascnt_runtime.run();
     println!("ascent: {}", now.elapsed().as_millis());
     println!("inferred tuples: {}", ascnt_runtime.T.len());
-    println!(
-        "index size: {}, {}, {}",
-        ascnt_runtime.T_indices_0_1.len(),
-        ascnt_runtime.T_indices_1_2.len(),
-        ascnt_runtime.T_indices_1.len(),
-    )
 }

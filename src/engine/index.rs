@@ -39,6 +39,8 @@ fn index<'a>(
 ) -> IndexedRepresentation<'a> {
     let mut results: IndexedRepresentation<'a> = HashMap::new();
 
+    let mut total = 0;
+    let mut useless = 0;
     for (symbol, uccs) in unique_column_combinations.iter() {
         let current_relation_entry = results.entry(symbol.clone()).or_default();
         uccs.iter().for_each(|ucc| {
@@ -60,12 +62,32 @@ fn index<'a>(
                         let current_masked_atoms = current_ucc_entry
                             .entry(hashisher(projected_row))
                             .or_default();
-                        current_masked_atoms.insert(fact);
+                        total += 1;
+                        let wasteful = current_masked_atoms.insert(fact);
+                        if wasteful {
+                            useless += 1;
+                        }
                     }
                 }
             }
         });
     }
+
+    println!("total: {}, wasteful: {}", total, useless);
+    results.iter().for_each(|(sym, outer)| {
+        outer.iter().for_each(|(positions, contents)| {
+            println!(
+                "sym: {}, position: {:?}, quantity: {}",
+                sym,
+                positions,
+                contents
+                    .values()
+                    .into_iter()
+                    .map(|hs| hs.len())
+                    .sum::<usize>(),
+            )
+        });
+    });
 
     results
 }
