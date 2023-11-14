@@ -1,7 +1,9 @@
-use crate::engine::index::UniqueColumnCombinations;
-use crate::engine::program_index::RuleJoinOrders;
+use crate::engine::index::{Index, UniqueColumnCombinations};
+use crate::engine::program_index::{ProgramIndex, RuleJoinOrders};
 use crate::engine::storage::RelationStorage;
+use ascent::internal::Instant;
 use datalog_syntax::Program;
+use std::time;
 
 pub fn semi_naive_evaluation(
     fact_storage: &mut RelationStorage,
@@ -11,20 +13,48 @@ pub fn semi_naive_evaluation(
     recursive_join_order: &RuleJoinOrders,
     global_uccs: &UniqueColumnCombinations,
 ) {
+    let nonrecursive_index = ProgramIndex::from(vec![nonrecursive_delta_program]);
+    let recursive_index = ProgramIndex::from(vec![recursive_delta_program]);
+
+    let now = Instant::now();
+    let mut index = Index::new(
+        &fact_storage,
+        nonrecursive_index.unique_program_column_combinations,
+    );
+    println!("first_index: {} milis", now.elapsed().as_millis());
+
     fact_storage.materialize_delta_program(
         &nonrecursive_delta_program,
         nonrecursive_join_order,
-        &global_uccs,
+        &index,
     );
+
+    let now = Instant::now();
+    index.update(
+        &fact_storage,
+        &recursive_index.unique_program_column_combinations,
+    );
+    println!("second_index: {} milis", now.elapsed().as_millis());
 
     loop {
         let previous_non_delta_fact_count = fact_storage.len();
+        /*let index = Index::new(
+            &fact_storage,
+            &recursive_program_index.unique_program_column_combinations,
+        );*/
 
         fact_storage.materialize_delta_program(
             &recursive_delta_program,
             recursive_join_order,
-            &global_uccs,
+            &index,
         );
+
+        let now = Instant::now();
+        index.update(
+            &fact_storage,
+            &recursive_index.unique_program_column_combinations,
+        );
+        println!("update: {} milis", now.elapsed().as_millis());
 
         let current_non_delta_fact_count = fact_storage.len();
 

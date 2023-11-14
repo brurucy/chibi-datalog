@@ -8,7 +8,7 @@ pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
     facts_storage: &'a RelationStorage,
     join_order: &'a JoinOrder,
-    index: &'a Index<'a>,
+    index: &'a Index,
 }
 
 impl<'a> RuleEvaluator<'a> {
@@ -68,7 +68,6 @@ impl<'a> RuleEvaluator<'a> {
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
-                                //new_rewrites.push(local_rewrite);
                                 new_rewrites.push(local_rewrite);
                             };
                         });
@@ -82,7 +81,6 @@ impl<'a> RuleEvaluator<'a> {
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
-                                //new_rewrites.push(local_rewrite);
                                 new_rewrites.push(local_rewrite);
                             });
                         }

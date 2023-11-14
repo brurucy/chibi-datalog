@@ -174,16 +174,16 @@ impl RelationStorage {
         &mut self,
         program: &Program,
         rule_join_orders: &RuleJoinOrders,
-        global_uccs: &UniqueColumnCombinations,
+        index: &Index,
     ) {
         let now = Instant::now();
 
-        let program_local_uccs = ProgramIndex::from(vec![program]);
+        /*let program_local_uccs = ProgramIndex::from(vec![program]);
         let index = Index::new(
             &self,
             &program_local_uccs.unique_program_column_combinations,
-        );
-        println!("indexing time: {}", now.elapsed().as_micros());
+        );*/
+        //println!("indexing time: {}", now.elapsed().as_micros());
 
         let evaluation_setup: Vec<_> = program
             .inner
@@ -200,23 +200,28 @@ impl RelationStorage {
         let evaluation = evaluation_setup
             .into_iter()
             .map(|(delta_relation_symbol, rule)| {
-                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
+                (delta_relation_symbol, rule.step().collect::<HashSet<_>>())
             })
             .collect::<Vec<_>>();
         println!("evaluation time: {}", now.elapsed().as_micros());
 
-        evaluation.iter().for_each(|(delta_relation_symbol, _)| {
-            self.clear_relation(delta_relation_symbol);
-        });
+        evaluation
+            .iter()
+            .for_each(|(delta_relation_symbol, _)| self.clear_relation(delta_relation_symbol));
 
         evaluation
             .into_iter()
-            .for_each(|(delta_relation_symbol, facts)| {
-                self.insert_all(delta_relation_symbol, facts.clone().into_iter());
+            .for_each(|(delta_relation_symbol, current_delta_evaluation)| {
+                let diff: Vec<_> = current_delta_evaluation
+                    .difference(self.get_relation(delta_relation_symbol).unwrap())
+                    .cloned()
+                    .collect();
+
+                self.insert_all(delta_relation_symbol, diff.clone().into_iter());
 
                 self.insert_all(
                     delta_relation_symbol.strip_prefix(DELTA_PREFIX).unwrap(),
-                    facts.into_iter(),
+                    diff.into_iter(),
                 );
             });
     }
@@ -226,6 +231,15 @@ impl RelationStorage {
             .inner
             .iter()
             .filter(|(symbol, _)| !symbol.starts_with(DELTA_PREFIX))
+            .map(|(_, relation)| relation.len())
+            .sum();
+    }
+
+    pub fn delta_len(&self) -> usize {
+        return self
+            .inner
+            .iter()
+            .filter(|(symbol, _)| symbol.starts_with(DELTA_PREFIX))
             .map(|(_, relation)| relation.len())
             .sum();
     }

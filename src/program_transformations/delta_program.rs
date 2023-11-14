@@ -78,8 +78,8 @@ mod test {
         let actual_program = make_delta_program(&program, false);
         let expected_program = program! {
             Δtc(?x, ?y) <- [e(?x, ?y)],
-            Δtc(? x, ?z) <- [Δtc(? x, ?y), tc(? y, ?z)],
-            Δtc(? x, ?z) <-[tc(? x, ?y), Δtc(? y, ?z)],
+            Δtc(? x, ?z) <- [Δtc(? x, ?y), tc(?y, ?z)],
+            Δtc(? x, ?z) <-[tc(? x, ?y), Δtc(?y, ?z)],
         };
 
         assert_eq!(expected_program, actual_program)

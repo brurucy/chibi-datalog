@@ -1,3 +1,4 @@
+use crate::engine::index::UniqueColumnCombinations;
 use ahash::{HashMap, HashSet};
 use datalog_syntax::{Program, Term};
 
@@ -6,11 +7,8 @@ pub type RuleJoinOrders = HashMap<usize, JoinOrder>;
 
 pub fn compute_unique_column_combinations_and_join_order(
     programs: Vec<&Program>,
-) -> (
-    HashMap<String, Vec<Vec<usize>>>,
-    HashMap<usize, HashMap<usize, JoinOrder>>,
-) {
-    let mut out: HashMap<String, Vec<Vec<usize>>> = Default::default();
+) -> (UniqueColumnCombinations, HashMap<usize, RuleJoinOrders>) {
+    let mut out: HashMap<String, HashSet<Vec<usize>>> = Default::default();
     let mut join_key_sequence: HashMap<usize, HashMap<usize, Vec<Vec<usize>>>> = Default::default();
 
     for (program_id, program) in programs.iter().enumerate() {
@@ -35,7 +33,7 @@ pub fn compute_unique_column_combinations_and_join_order(
                     .collect();
 
                 let entry = out.entry(body_atom.symbol.clone()).or_default();
-                entry.push(indices.clone());
+                entry.insert(indices.clone());
 
                 rule_join_key_sequence.push(indices);
             }
@@ -50,7 +48,7 @@ pub fn compute_unique_column_combinations_and_join_order(
 }
 
 pub struct ProgramIndex {
-    pub unique_program_column_combinations: HashMap<String, Vec<Vec<usize>>>,
+    pub unique_program_column_combinations: UniqueColumnCombinations,
     pub binding_guided_join_order: HashMap<usize, HashMap<usize, Vec<Vec<usize>>>>,
 }
 

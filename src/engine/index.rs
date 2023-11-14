@@ -1,26 +1,25 @@
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
+use crate::helpers::helpers::{add_prefix, DELTA_PREFIX};
 use ahash::{AHasher, HashMap, HashMapExt, HashSet};
-use datalog_syntax::{AnonymousGroundAtom, TypedValue};
+use ascent::internal::Instant;
+use datalog_syntax::AnonymousGroundAtom;
+use lazy_static::lazy_static;
 use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
 
-pub type UniqueColumnCombinations = HashMap<String, Vec<Vec<usize>>>;
-pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
+pub type UniqueColumnCombinations = HashMap<String, HashSet<Vec<usize>>>;
 
 fn hashisher<K: Hash>(key: &Vec<K>) -> usize {
     let mut hasher = AHasher::default();
 
     key.iter()
-        //.for_each(|masked_value| masked_atom.push(masked_value));
         .for_each(|masked_value| masked_value.hash(&mut hasher));
 
     hasher.finish() as usize
 }
 
 pub fn mask_atom(atom: &InternedAtom) -> usize {
-    //MaskedAtom {
-    //let mut masked_atom = Vec::new();
-
     let mut hasher = AHasher::default();
 
     atom.terms
@@ -35,17 +34,43 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
     hasher.finish() as usize
 }
 
-pub type IndexedRepresentation<'a> =
-    HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<&'a AnonymousGroundAtom>>>>;
+lazy_static! {
+    static ref FACT_REGISTRY: Mutex<HashSet<&'static AnonymousGroundAtom>> = {
+        let mut hm = Mutex::new(HashSet::default());
 
-fn index<'a>(
-    unique_column_combinations: &HashMap<String, Vec<Vec<usize>>>,
-    facts_by_relation: &'a RelationStorage,
-) -> IndexedRepresentation<'a> {
-    let mut results: IndexedRepresentation<'a> = HashMap::new();
+        hm
+    };
+}
 
-    let mut total = 0;
-    let mut useless = 0;
+fn register_atom(atom: &AnonymousGroundAtom) -> &'static AnonymousGroundAtom {
+    let mut fregistry = FACT_REGISTRY.lock().unwrap();
+
+    return match fregistry.get(atom) {
+        None => {
+            let boxed_atom = Box::new(atom.clone());
+            let leaked_boxed_atom: &'static AnonymousGroundAtom = Box::leak(boxed_atom);
+            fregistry.insert(leaked_boxed_atom);
+
+            leaked_boxed_atom
+        }
+        Some(inner) => *inner,
+    };
+}
+
+/*pub struct IndexedRepresentation<'a> {
+    inner: HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<AnonymousGroundAtom>>>>,
+    fact_storage: &'a mut RelationStorage,
+}*/
+
+pub type IndexedRepresentation =
+    HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<&'static AnonymousGroundAtom>>>>;
+
+fn index(
+    unique_column_combinations: &UniqueColumnCombinations,
+    facts_by_relation: &RelationStorage,
+) -> IndexedRepresentation {
+    let mut results: IndexedRepresentation = HashMap::new();
+
     for (symbol, uccs) in unique_column_combinations.iter() {
         let current_relation_entry = results.entry(symbol.clone()).or_default();
         uccs.iter().for_each(|ucc| {
@@ -67,18 +92,14 @@ fn index<'a>(
                         let current_masked_atoms = current_ucc_entry
                             .entry(hashisher(&projected_row))
                             .or_default();
-                        total += 1;
-                        let wasteful = current_masked_atoms.insert(fact);
-                        if !wasteful {
-                            useless += 1;
-                        }
+
+                        current_masked_atoms.insert(register_atom(fact));
                     }
                 }
             }
         });
     }
 
-    println!("total: {}, wasteful: {}", total, useless);
     results.iter().for_each(|(sym, outer)| {
         outer.iter().for_each(|(positions, contents)| {
             println!(
@@ -97,18 +118,67 @@ fn index<'a>(
     results
 }
 
-pub struct Index<'a> {
-    pub inner: IndexedRepresentation<'a>,
+pub struct Index {
+    pub inner: IndexedRepresentation,
+    pub ucc: UniqueColumnCombinations,
 }
 
-impl<'a> Index<'a> {
-    pub fn new(
-        relation_storage: &'a RelationStorage,
-        uccs: &HashMap<String, Vec<Vec<usize>>>,
-    ) -> Self {
+impl<'a> Index {
+    pub fn new(relation_storage: &'a RelationStorage, uccs: UniqueColumnCombinations) -> Self {
         let inner = index(&uccs, relation_storage);
 
-        return Self { inner };
+        return Self { inner, ucc: uccs };
+    }
+    pub fn update(
+        &mut self,
+        facts_by_relation: &RelationStorage,
+        update_ucc: &UniqueColumnCombinations,
+    ) {
+        for (symbol, uccs) in update_ucc {
+            let current_relation_entry = self.inner.entry(symbol.clone()).or_default();
+            let is_delta = symbol.starts_with(DELTA_PREFIX);
+            if is_delta {
+                uccs.iter().for_each(|delta_ucc| {
+                    current_relation_entry.remove(delta_ucc);
+                });
+            };
+
+            let mut local_symbol = symbol.clone();
+            if !is_delta {
+                add_prefix(&mut local_symbol, DELTA_PREFIX);
+            };
+
+            let now = Instant::now();
+            uccs.iter().for_each(|ucc| {
+                let current_relation_ucc = current_relation_entry.entry(ucc.clone()).or_default();
+                if !ucc.is_empty() {
+                    if let Some(facts) = facts_by_relation.inner.get(&local_symbol) {
+                        for fact in facts {
+                            let mut projected_row = vec![None; fact.len()];
+
+                            // Perform the projection using the unique columns.
+                            for &column_index in ucc {
+                                if column_index < fact.len() {
+                                    projected_row[column_index] = Some(&fact[column_index]);
+                                }
+                            }
+
+                            let current_masked_atoms = current_relation_ucc
+                                .entry(hashisher(&projected_row))
+                                .or_default();
+
+                            current_masked_atoms.insert(register_atom(&fact));
+                        }
+                    }
+                }
+            });
+            println!(
+                "time to update relation {} uccs {:?}: {} milis",
+                symbol,
+                uccs,
+                now.elapsed().as_millis()
+            );
+        }
     }
 }
 
