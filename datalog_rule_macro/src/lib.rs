@@ -166,7 +166,7 @@ pub fn program(input: TokenStream) -> TokenStream {
             .iter()
             .map(|arg| match arg {
                 TermArg::Variable(ident) => quote! { Term::Variable(stringify!(#ident).to_string()) },
-                TermArg::Constant(expr) => quote! { Term::Constant(TypedValue::from(#expr)) },
+                TermArg::Constant(expr) => quote! { Term::Constant(#expr) },
             })
             .collect();
 

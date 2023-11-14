@@ -1,7 +1,9 @@
 use ordered_float::OrderedFloat;
 use std::fmt::{Debug, Formatter};
 
-#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Hash)]
+pub type TypedValue = usize;
+
+/*#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Hash)]
 pub enum TypedValue {
     Str(String),
     Int(usize),
@@ -49,7 +51,7 @@ impl From<f64> for TypedValue {
         TypedValue::Float(OrderedFloat::from(value))
     }
 }
-
+*/
 pub type Variable = String;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]

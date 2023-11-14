@@ -8,7 +8,7 @@ use phf::phf_map;
 use std::time::Instant;
 
 // TC benchmark
-/*crepe! {
+crepe! {
     @input
     struct e(usize, usize);
 
@@ -60,8 +60,8 @@ fn main() {
     ascnt_runtime.run();
     println!("ascent: {}", now.elapsed().as_micros());
 }
-*/
-crepe! {
+
+/*crepe! {
     @input
     struct RDF(usize, usize, usize);
 
@@ -107,12 +107,12 @@ fn parse_triple(line: &str) -> (&str, &str, &str) {
 fn main() {
     let program = program! {
         T(?s, ?p, ?o) <- [RDF(?s, ?p, ?o)],
-        T(?y, 0, ?x) <- [T(?a, 3, ?x), T(?y, ?a, ?z)],
-        T(?z, 0, ?x) <- [T(?a, 4, ?x), T(?y, ?a, ?z)],
-        T(?x, 2, ?z) <- [T(?x, 2, ?y), T(?y, 2, ?z)],
-        T(?x, 1, ?z) <- [T(?x, 1, ?y), T(?y, 1, ?z)],
-        T(?z, 0, ?y) <- [T(?x, 1, ?y), T(?z, 0, ?x)],
-        T(?x, ?b, ?y) <- [T(?a, 2, ?b), T(?x, ?a, ?y)]
+        T(?y, 0, ?x) <- [T(?a, 3 as usize, ?x), T(?y, ?a, ?z)],
+        T(?z, 0, ?x) <- [T(?a, 4 as usize, ?x), T(?y, ?a, ?z)],
+        T(?x, 2, ?z) <- [T(?x, 2 as usize, ?y), T(?y, 2 as usize, ?z)],
+        T(?x, 1, ?z) <- [T(?x, 1 as usize, ?y), T(?y, 1 as usize, ?z)],
+        T(?z, 0, ?y) <- [T(?x, 1 as usize, ?y), T(?z, 0 as usize, ?x)],
+        T(?x, ?b, ?y) <- [T(?a, 2 as usize, ?b), T(?x, ?a, ?y)]
     };
 
     let mut rodeo = Rodeo::default();
@@ -161,3 +161,4 @@ fn main() {
     println!("ascent: {}", now.elapsed().as_millis());
     println!("inferred tuples: {}", ascnt_runtime.T.len());
 }
+*/
