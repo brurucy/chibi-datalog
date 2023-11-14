@@ -7,17 +7,21 @@ use std::hash::{Hash, Hasher};
 pub type UniqueColumnCombinations = HashMap<String, Vec<Vec<usize>>>;
 pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
 
-fn hashisher<K: Hash>(key: K) -> usize {
+fn hashisher<K: Hash>(key: &Vec<K>) -> usize {
     let mut hasher = AHasher::default();
-    key.hash(&mut hasher);
-    let hashed_key = hasher.finish();
 
-    hashed_key as usize
+    key.iter()
+        //.for_each(|masked_value| masked_atom.push(masked_value));
+        .for_each(|masked_value| masked_value.hash(&mut hasher));
+
+    hasher.finish() as usize
 }
 
 pub fn mask_atom(atom: &InternedAtom) -> usize {
     //MaskedAtom {
-    let mut masked_atom = Vec::new();
+    //let mut masked_atom = Vec::new();
+
+    let mut hasher = AHasher::default();
 
     atom.terms
         .iter()
@@ -25,9 +29,10 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
             InternedTerm::Constant(value) => Some(value),
             _ => None,
         })
-        .for_each(|masked_value| masked_atom.push(masked_value));
+        //.for_each(|masked_value| masked_atom.push(masked_value));
+        .for_each(|masked_value| masked_value.hash(&mut hasher));
 
-    return hashisher(masked_atom);
+    hasher.finish() as usize
 }
 
 pub type IndexedRepresentation<'a> =
@@ -60,11 +65,11 @@ fn index<'a>(
                         }
 
                         let current_masked_atoms = current_ucc_entry
-                            .entry(hashisher(projected_row))
+                            .entry(hashisher(&projected_row))
                             .or_default();
                         total += 1;
                         let wasteful = current_masked_atoms.insert(fact);
-                        if wasteful {
+                        if !wasteful {
                             useless += 1;
                         }
                     }

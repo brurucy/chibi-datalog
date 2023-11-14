@@ -289,10 +289,10 @@ mod tests {
         runtime.poll();
 
         // This query reads as: "Get all in tc with any values in any positions"
-        let all = build_query!(tc(_, _, _));
+        let all = build_query!(tc(_, _));
         // And this one as: "Get all in tc with the first term being a"
         // There also is a QueryBuilder, if you do not want to use a macro.
-        let all_from_a = build_query!(tc("a", _, _));
+        let all_from_a = build_query!(tc("a", _));
 
         let actual_all: HashSet<&AnonymousGroundAtom> = runtime.query(&all).unwrap().collect();
         let expected_all: HashSet<AnonymousGroundAtom> = vec![

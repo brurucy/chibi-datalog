@@ -18,6 +18,7 @@ pub fn compute_unique_column_combinations_and_join_order(
         for rule in &program.inner {
             let mut variables: HashSet<String> = Default::default();
             let mut rule_join_key_sequence = vec![];
+
             for body_atom in &rule.body {
                 let indices: Vec<_> = body_atom
                     .terms
