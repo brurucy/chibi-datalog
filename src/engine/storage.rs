@@ -176,15 +176,6 @@ impl RelationStorage {
         rule_join_orders: &RuleJoinOrders,
         index: &Index,
     ) {
-        let now = Instant::now();
-
-        /*let program_local_uccs = ProgramIndex::from(vec![program]);
-        let index = Index::new(
-            &self,
-            &program_local_uccs.unique_program_column_combinations,
-        );*/
-        //println!("indexing time: {}", now.elapsed().as_micros());
-
         let evaluation_setup: Vec<_> = program
             .inner
             .iter()
@@ -203,7 +194,7 @@ impl RelationStorage {
                 (delta_relation_symbol, rule.step().collect::<HashSet<_>>())
             })
             .collect::<Vec<_>>();
-        println!("evaluation time: {}", now.elapsed().as_micros());
+        println!("evaluation time: {} milis", now.elapsed().as_millis());
 
         evaluation
             .iter()
