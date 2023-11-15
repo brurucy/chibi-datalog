@@ -59,8 +59,8 @@ fn main() {
     let now = Instant::now();
     ascnt_runtime.run();
     println!("ascent: {}", now.elapsed().as_micros());
-}*/
-
+}
+*/
 crepe! {
     @input
     struct RDF(usize, usize, usize);
