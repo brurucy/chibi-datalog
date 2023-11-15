@@ -5,6 +5,7 @@ use ahash::{AHasher, HashMap, HashMapExt, HashSet};
 use ascent::internal::Instant;
 use datalog_syntax::AnonymousGroundAtom;
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
@@ -71,48 +72,60 @@ fn index(
 ) -> IndexedRepresentation {
     let mut results: IndexedRepresentation = HashMap::new();
 
-    for (symbol, uccs) in unique_column_combinations.iter() {
-        let current_relation_entry = results.entry(symbol.clone()).or_default();
-        uccs.iter().for_each(|ucc| {
-            let current_ucc_entry = current_relation_entry.entry(ucc.clone()).or_default();
+    /*let now = Instant::now();
+    facts_by_relation.inner.iter().for_each(|(sym, facts)| {
+        facts.iter().for_each(|fact| {
+            register_atom(fact);
+        })
+    });
+    println!("registration: {} micros", now.elapsed().as_micros());*/
 
-            // It is pointless to index empty join keys, since it will just clone the whole relation instead of a column subset
+    let flattened_uccs: Vec<(
+        String,
+        Vec<usize>,
+        HashMap<usize, HashSet<&'static AnonymousGroundAtom>>,
+    )> = unique_column_combinations
+        .iter()
+        .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+            curr_uccs.into_iter().for_each(|ucc| {
+                acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+            });
+
+            acc
+        });
+
+    let index: Vec<_> = flattened_uccs
+        .into_par_iter()
+        .map(|(sym, ucc, mut ucc_index)| {
             if !ucc.is_empty() {
-                if let Some(facts) = facts_by_relation.inner.get(symbol) {
+                if let Some(facts) = facts_by_relation.inner.get(&sym) {
                     for fact in facts {
                         let mut projected_row = vec![None; fact.len()];
 
                         // Perform the projection using the unique columns.
-                        for &column_index in ucc {
+                        for &column_index in &ucc {
                             if column_index < fact.len() {
                                 projected_row[column_index] = Some(&fact[column_index]);
                             }
                         }
 
-                        let current_masked_atoms = current_ucc_entry
-                            .entry(hashisher(&projected_row))
-                            .or_default();
+                        let current_masked_atoms =
+                            ucc_index.entry(hashisher(&projected_row)).or_default();
 
                         current_masked_atoms.insert(register_atom(fact));
                     }
                 }
             }
-        });
-    }
 
-    results.iter().for_each(|(sym, outer)| {
-        outer.iter().for_each(|(positions, contents)| {
-            println!(
-                "sym: {}, position: {:?}, quantity: {}",
-                sym,
-                positions,
-                contents
-                    .values()
-                    .into_iter()
-                    .map(|hs| hs.len())
-                    .sum::<usize>(),
-            )
-        });
+            (sym, ucc, ucc_index)
+        })
+        .collect();
+
+    index.into_iter().for_each(|(sym, ucc, ucc_index)| {
+        let sym_uccs = results.entry(sym).or_default();
+        let ucc_projections = sym_uccs.entry(ucc).or_default();
+
+        *ucc_projections = ucc_index;
     });
 
     results
@@ -134,7 +147,78 @@ impl<'a> Index {
         facts_by_relation: &RelationStorage,
         update_ucc: &UniqueColumnCombinations,
     ) {
+        let flattened_uccs: Vec<(
+            String,
+            Vec<usize>,
+            HashMap<usize, HashSet<&'a AnonymousGroundAtom>>,
+        )> = update_ucc
+            .iter()
+            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+                curr_uccs.into_iter().for_each(|ucc| {
+                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+                });
+
+                acc
+            });
+
+        // Invalidating delta indexes
         for (symbol, uccs) in update_ucc {
+            let current_relation_entry = self.inner.entry(symbol.clone()).or_default();
+            let is_delta = symbol.starts_with(DELTA_PREFIX);
+            if is_delta {
+                uccs.iter().for_each(|delta_ucc| {
+                    current_relation_entry.remove(delta_ucc);
+                });
+            };
+        }
+
+        flattened_uccs
+            .into_par_iter()
+            .map(|(sym, ucc, mut ucc_index)| {
+                let mut local_sym = sym.clone();
+                let is_delta = sym.starts_with(DELTA_PREFIX);
+                if !is_delta {
+                    add_prefix(&mut local_sym, DELTA_PREFIX);
+                }
+
+                if !ucc.is_empty() {
+                    if let Some(facts) = facts_by_relation.inner.get(&local_sym) {
+                        for fact in facts {
+                            let mut projected_row = vec![None; fact.len()];
+
+                            // Perform the projection using the unique columns.
+                            for &column_index in &ucc {
+                                if column_index < fact.len() {
+                                    projected_row[column_index] = Some(&fact[column_index]);
+                                }
+                            }
+
+                            let current_masked_atoms =
+                                ucc_index.entry(hashisher(&projected_row)).or_default();
+                            current_masked_atoms.insert(fact);
+                        }
+                    }
+                }
+
+                (sym, ucc, ucc_index)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .for_each(|(sym, ucc, ucc_index)| {
+                let sym_uccs = self.inner.entry(sym).or_default();
+                let ucc_projections = sym_uccs.entry(ucc).or_default();
+
+                ucc_index
+                    .into_iter()
+                    .for_each(|(projection, fact_references)| {
+                        let projection_mappings = ucc_projections.entry(projection).or_default();
+
+                        projection_mappings
+                            .extend(fact_references.into_iter().map(|fact| register_atom(fact)));
+                    });
+            });
+
+        /*for (symbol, uccs) in update_ucc {
             let current_relation_entry = self.inner.entry(symbol.clone()).or_default();
             let is_delta = symbol.starts_with(DELTA_PREFIX);
             if is_delta {
@@ -178,7 +262,7 @@ impl<'a> Index {
                 uccs,
                 now.elapsed().as_millis()
             );
-        }
+        }*/
     }
 }
 

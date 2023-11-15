@@ -2,6 +2,7 @@ use crate::engine::index::{mask_atom, Index};
 use crate::engine::program_index::JoinOrder;
 use crate::engine::rewrite::{intern_rule, unify, Rewrite};
 use crate::engine::storage::RelationStorage;
+use ascent::internal::Instant;
 use datalog_syntax::{AnonymousGroundAtom, Rule};
 
 pub struct RuleEvaluator<'a> {
@@ -89,7 +90,6 @@ impl<'a> RuleEvaluator<'a> {
 
             current_rewrites = new_rewrites.into_iter().collect();
         }
-
         current_rewrites
             .into_iter()
             .map(move |rewrite| rewrite.ground(&interned_rule.head))
