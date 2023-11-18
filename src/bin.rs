@@ -146,18 +146,18 @@ fn main() {
 
     let now = Instant::now();
     chibi_runtime.poll();
-    println!("chibi: {}", now.elapsed().as_millis());
+    println!("chibi: {} milis", now.elapsed().as_millis());
     let q = build_query!(T(_, _, _));
     let answer: Vec<_> = chibi_runtime.query(&q).unwrap().into_iter().collect();
     println!("inferred tuples: {}", answer.len());
 
     let now = Instant::now();
     let crepe_out = crepe_runtime.run();
-    println!("crepe: {}", now.elapsed().as_millis());
+    println!("crepe: {} milis", now.elapsed().as_millis());
     println!("inferred tuples: {}", crepe_out.0.len());
 
     let now = Instant::now();
     ascnt_runtime.run();
-    println!("ascent: {}", now.elapsed().as_millis());
+    println!("ascent: {} milis", now.elapsed().as_millis());
     println!("inferred tuples: {}", ascnt_runtime.T.len());
 }

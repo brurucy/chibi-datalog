@@ -27,20 +27,24 @@ pub struct ChibiRuntime {
 
 impl ChibiRuntime {
     pub fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) -> bool {
-        self.unprocessed_insertions.insert(relation, ground_atom)
+        self.unprocessed_insertions
+            .insert(relation, ground_atom.clone());
+        self.processed.register(ground_atom);
+
+        true
     }
     pub fn remove(&mut self, query: &Query) {
-        self.processed
-            .inner
-            .get(query.symbol)
-            .unwrap()
-            .iter()
-            .for_each(|fact| {
-                if pattern_match(query, fact) {
-                    self.unprocessed_deletions
-                        .insert(query.symbol, fact.clone());
-                }
-            })
+        /*self.processed
+        .inner
+        .get(query.symbol)
+        .unwrap()
+        .iter()
+        .for_each(|fact| {
+            if pattern_match(query, fact) {
+                self.unprocessed_deletions
+                    .insert(query.symbol, fact.clone());
+            }
+        })*/
     }
     pub fn contains(
         &self,
@@ -71,13 +75,14 @@ impl ChibiRuntime {
             .get(query.symbol)
             .unwrap()
             .iter()
+            .map(|fact| self.processed.fact_registry.get(*fact))
             .filter(|fact| pattern_match(query, fact)))
     }
     pub fn poll(&mut self) {
         let global_uccs = &self.program_index.unique_program_column_combinations;
 
         if !self.unprocessed_deletions.is_empty() {
-            self.unprocessed_deletions.drain_all_relations().for_each(
+            /*self.unprocessed_deletions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
                     let mut overdeletion_symbol = relation_symbol.clone();
                     add_prefix(&mut overdeletion_symbol, OVERDELETION_PREFIX);
@@ -115,7 +120,7 @@ impl ChibiRuntime {
             self.processed.rederive();
 
             self.processed.clear_prefix(OVERDELETION_PREFIX);
-            self.processed.clear_prefix(REDERIVATION_PREFIX);
+            self.processed.clear_prefix(REDERIVATION_PREFIX);*/
         }
         if !self.unprocessed_insertions.is_empty() {
             // Additions
@@ -124,13 +129,13 @@ impl ChibiRuntime {
                     // We dump all unprocessed EDB relations into delta EDB relations
                     self.processed
                         // This clone hurts.
-                        .insert_all(
+                        .insert_hashed(
                             &format!("{}{}", DELTA_PREFIX, relation_symbol),
                             unprocessed_facts.clone().into_iter(),
                         );
                     // And in their respective place
                     self.processed
-                        .insert_all(relation_symbol, unprocessed_facts.into_iter());
+                        .insert_hashed(relation_symbol, unprocessed_facts.into_iter());
                 },
             );
 

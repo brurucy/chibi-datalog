@@ -1,12 +1,11 @@
 use crate::engine::program_index::UniqueColumnCombinations;
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
+use crate::interning::fact_registry::FactRegistry;
 use ahash::{AHasher, HashMap, HashMapExt, HashSet};
 use datalog_syntax::{AnonymousGroundAtom, TypedValue};
 use rayon::prelude::*;
 use std::hash::{Hash, Hasher};
-
-pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
 
 fn hashisher<K: Hash>(key: &Vec<K>) -> usize {
     let mut hasher = AHasher::default();
@@ -37,6 +36,7 @@ pub type IndexedRepresentation<'a> =
 fn index<'a>(
     unique_column_combinations: &UniqueColumnCombinations,
     facts_by_relation: &'a RelationStorage,
+    fact_registry: &'a FactRegistry,
 ) -> IndexedRepresentation<'a> {
     let mut results: IndexedRepresentation<'a> = HashMap::new();
 
@@ -55,11 +55,13 @@ fn index<'a>(
         });
 
     let index: Vec<_> = flattened_uccs
+        // Has to be parallel
         .into_par_iter()
         .map(|(sym, ucc, mut ucc_index)| {
             if !ucc.is_empty() {
-                if let Some(facts) = facts_by_relation.inner.get(&sym) {
-                    for fact in facts {
+                if let Some(hashes) = facts_by_relation.inner.get(&sym) {
+                    for hash in hashes {
+                        let fact = fact_registry.get(*hash);
                         let mut projected_row = vec![None; fact.len()];
 
                         // Perform the projection using the unique columns.
@@ -87,21 +89,6 @@ fn index<'a>(
         *ucc_projections = ucc_index;
     });
 
-    results.iter().for_each(|(sym, outer)| {
-        outer.iter().for_each(|(positions, contents)| {
-            println!(
-                "sym: {}, position: {:?}, quantity: {}",
-                sym,
-                positions,
-                contents
-                    .values()
-                    .into_iter()
-                    .map(|hs| hs.len())
-                    .sum::<usize>(),
-            )
-        });
-    });
-
     results
 }
 
@@ -110,8 +97,12 @@ pub struct Index<'a> {
 }
 
 impl<'a> Index<'a> {
-    pub fn new(relation_storage: &'a RelationStorage, uccs: &UniqueColumnCombinations) -> Self {
-        let inner = index(&uccs, relation_storage);
+    pub fn new(
+        relation_storage: &'a RelationStorage,
+        uccs: &'a UniqueColumnCombinations,
+        fact_registry: &'a FactRegistry,
+    ) -> Self {
+        let inner = index(&uccs, relation_storage, fact_registry);
 
         return Self { inner };
     }

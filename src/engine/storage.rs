@@ -2,30 +2,29 @@ use crate::engine::index::Index;
 use crate::engine::program_index::{ProgramIndex, RuleJoinOrders, UniqueColumnCombinations};
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
+use crate::interning::fact_registry::FactRegistry;
 use ahash::{HashMap, HashSet, HashSetExt};
 use datalog_syntax::{AnonymousGroundAtom, Program};
+use lasso::Rodeo;
 use rayon::prelude::*;
 use std::time::Instant;
 
-pub type FactStorage = HashSet<AnonymousGroundAtom>;
+pub type Row = usize;
+pub type FactStorage = HashSet<Row>;
 #[derive(Default)]
 pub struct RelationStorage {
     pub(crate) inner: HashMap<String, FactStorage>,
+    pub(crate) fact_registry: FactRegistry,
 }
 
 impl RelationStorage {
     pub fn get_relation(&self, relation_symbol: &str) -> Option<&FactStorage> {
         return self.inner.get(relation_symbol);
     }
-    pub fn drain_relation(
-        &mut self,
-        relation_symbol: &str,
-    ) -> impl Iterator<Item = AnonymousGroundAtom> + '_ {
+    pub fn drain_relation(&mut self, relation_symbol: &str) -> impl Iterator<Item = Row> + '_ {
         self.inner.get_mut(relation_symbol).unwrap().drain()
     }
-    pub fn drain_all_relations(
-        &mut self,
-    ) -> impl Iterator<Item = (&String, Vec<AnonymousGroundAtom>)> + '_ {
+    pub fn drain_all_relations(&mut self) -> impl Iterator<Item = (&String, Vec<Row>)> + '_ {
         self.inner
             .iter_mut()
             .map(|(relation_symbol, facts)| (relation_symbol, facts.drain().collect::<Vec<_>>()))
@@ -33,7 +32,7 @@ impl RelationStorage {
     pub fn drain_prefix_filter<'a>(
         &'a mut self,
         prefix: &'a str,
-    ) -> impl Iterator<Item = (&String, Vec<AnonymousGroundAtom>)> + '_ {
+    ) -> impl Iterator<Item = (&String, Vec<Row>)> + '_ {
         return self
             .inner
             .iter_mut()
@@ -134,28 +133,51 @@ impl RelationStorage {
         }
     }
 
+    pub fn insert_hashed(&mut self, relation_symbol: &str, hashes: impl Iterator<Item = Row>) {
+        if let Some(relation) = self.inner.get_mut(relation_symbol) {
+            relation.extend(hashes)
+        } else {
+            let mut fresh_fact_storage = FactStorage::new();
+            fresh_fact_storage.extend(hashes);
+
+            self.inner
+                .insert(relation_symbol.to_string(), fresh_fact_storage);
+        }
+    }
+
     pub fn insert_all(
         &mut self,
         relation_symbol: &str,
         facts: impl Iterator<Item = AnonymousGroundAtom>,
     ) {
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
-            relation.extend(facts)
+            relation.extend(
+                facts
+                    .into_iter()
+                    .map(|fact| self.fact_registry.register(fact)),
+            )
         } else {
             let mut fresh_fact_storage = FactStorage::new();
-            fresh_fact_storage.extend(facts);
+            fresh_fact_storage.extend(
+                facts
+                    .into_iter()
+                    .map(|fact| self.fact_registry.register(fact)),
+            );
 
             self.inner
                 .insert(relation_symbol.to_string(), fresh_fact_storage);
         }
     }
+    pub fn register(&mut self, fact: AnonymousGroundAtom) {
+        self.fact_registry.register(fact);
+    }
     pub fn insert(&mut self, relation_symbol: &str, ground_atom: AnonymousGroundAtom) -> bool {
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
-            return relation.insert(ground_atom);
+            return relation.insert(self.fact_registry.register(ground_atom));
         }
 
         let mut fresh_fact_storage = FactStorage::new();
-        fresh_fact_storage.insert(ground_atom);
+        fresh_fact_storage.insert(self.fact_registry.register(ground_atom));
 
         self.inner
             .insert(relation_symbol.to_string(), fresh_fact_storage);
@@ -164,7 +186,7 @@ impl RelationStorage {
     }
     pub fn contains(&self, relation_symbol: &str, ground_atom: &AnonymousGroundAtom) -> bool {
         if let Some(relation) = self.inner.get(relation_symbol) {
-            return relation.contains(ground_atom);
+            return relation.contains(&self.fact_registry.compute_key(ground_atom));
         }
 
         false
@@ -182,8 +204,9 @@ impl RelationStorage {
         let index = Index::new(
             &self,
             &program_local_uccs.unique_program_column_combinations,
+            &self.fact_registry,
         );
-        println!("indexing time: {}", now.elapsed().as_micros());
+        println!("indexing time: {} milis", now.elapsed().as_millis());
 
         let evaluation_setup: Vec<_> = program
             .inner
@@ -191,39 +214,67 @@ impl RelationStorage {
             .map(|rule| {
                 (
                     &rule.head.symbol,
-                    RuleEvaluator::new(self, rule, rule_join_orders.get(&rule.id).unwrap(), &index),
+                    RuleEvaluator::new(
+                        self,
+                        rule,
+                        rule_join_orders.get(&rule.id).unwrap(),
+                        &index,
+                        &self.fact_registry,
+                    ),
                 )
             })
             .collect();
 
         let now = Instant::now();
         let evaluation = evaluation_setup
-            .into_iter()
+            .into_par_iter()
             .map(|(delta_relation_symbol, rule)| {
                 (delta_relation_symbol, rule.step().collect::<HashSet<_>>())
             })
             .collect::<Vec<_>>();
-        println!("evaluation time: {}", now.elapsed().as_micros());
+        println!("evaluation time: {} milis", now.elapsed().as_millis());
 
-        evaluation
-            .iter()
-            .for_each(|(delta_relation_symbol, _)| self.clear_relation(delta_relation_symbol));
+        let relations_to_clear: HashSet<_> =
+            evaluation.iter().map(|(sym, _)| sym).cloned().collect();
+        relations_to_clear.iter().for_each(|delta_relation_symbol| {
+            self.clear_relation(delta_relation_symbol);
+        });
 
+        let now = Instant::now();
         evaluation
             .into_iter()
             .for_each(|(delta_relation_symbol, current_delta_evaluation)| {
+                let relation_symbol = delta_relation_symbol.clone();
+                relation_symbol.strip_prefix(DELTA_PREFIX).unwrap();
+                let current_delta_relation_hashes = self.inner.get(delta_relation_symbol).unwrap();
+
                 let diff: Vec<_> = current_delta_evaluation
-                    .difference(self.get_relation(delta_relation_symbol).unwrap())
-                    .cloned()
+                    .into_iter()
+                    .filter(|inferred_fact| {
+                        if self.fact_registry.contains(inferred_fact) {
+                            let key = self.fact_registry.compute_key(inferred_fact);
+
+                            return !current_delta_relation_hashes.contains(&key);
+                        }
+
+                        true
+                    })
                     .collect();
 
-                self.insert_all(delta_relation_symbol, diff.clone().into_iter());
+                /*let diff: Vec<_> = current_delta_evaluation
+                .difference(self.get_relation(delta_relation_symbol).unwrap())
+                .cloned()
+                .collect();*/
+
+                self.insert_all(delta_relation_symbol, diff.clone().into_iter()); //diff.clone().into_iter());
 
                 self.insert_all(
                     delta_relation_symbol.strip_prefix(DELTA_PREFIX).unwrap(),
+                    //diff.into_iter(),
                     diff.into_iter(),
                 );
             });
+        println!("post-evaluation: {}", now.elapsed().as_millis());
     }
 
     pub fn len(&self) -> usize {
