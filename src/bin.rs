@@ -37,7 +37,7 @@ fn main() {
     let mut ascnt_runtime = AscentProgram::default();
     let mut crepe_runtime = Crepe::new();
 
-    let data = include_str!("../data/graph.txt");
+    let data = include_str!("../data/graph1000.txt");
     data.lines().into_iter().for_each(|line| {
         let triple: Vec<_> = line.split(" ").collect();
         let from: usize = triple[0].parse().unwrap();
@@ -50,15 +50,15 @@ fn main() {
 
     let now = Instant::now();
     chibi_runtime.poll();
-    println!("chibi: {}", now.elapsed().as_micros());
+    println!("chibi: {} milis", now.elapsed().as_millis());
 
     let now = Instant::now();
     crepe_runtime.run();
-    println!("crepe: {}", now.elapsed().as_micros());
+    println!("crepe: {} milis", now.elapsed().as_millis());
 
     let now = Instant::now();
     ascnt_runtime.run();
-    println!("ascent: {}", now.elapsed().as_micros());
+    println!("ascent: {} milis", now.elapsed().as_millis());
 }
 */
 crepe! {

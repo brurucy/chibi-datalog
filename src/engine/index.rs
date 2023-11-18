@@ -1,22 +1,13 @@
 use crate::engine::program_index::UniqueColumnCombinations;
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
-use crate::interning::fact_registry::{FactRegistry, Row};
-use ahash::{AHasher, HashMap, HashMapExt, HashSet};
+use crate::interning::fact_registry::{hashisher, FactRegistry, Row};
+use ahash::{HashMap, HashMapExt, HashSet};
 use rayon::prelude::*;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 
-fn hashisher<K: Hash>(key: &Vec<K>) -> usize {
-    let mut hasher = AHasher::default();
-
-    key.iter()
-        .for_each(|masked_value| masked_value.hash(&mut hasher));
-
-    hasher.finish() as usize
-}
-
-pub fn mask_atom(atom: &InternedAtom) -> usize {
-    let mut hasher = AHasher::default();
+pub fn mask_atom(atom: &InternedAtom) -> Row {
+    let mut masked_atom = vec![];
 
     atom.terms
         .iter()
@@ -24,12 +15,12 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
             InternedTerm::Constant(value) => Some(value),
             _ => None,
         })
-        .for_each(|masked_value| masked_value.hash(&mut hasher));
+        .for_each(|masked_value| masked_atom.push(masked_value));
 
-    hasher.finish() as usize
+    hashisher(&masked_atom)
 }
 
-pub type IndexedRepresentation = HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<Row>>>>;
+pub type IndexedRepresentation = HashMap<String, HashMap<Vec<usize>, HashMap<Row, HashSet<Row>>>>;
 
 fn index(
     unique_column_combinations: &UniqueColumnCombinations,
@@ -38,50 +29,118 @@ fn index(
 ) -> IndexedRepresentation {
     let mut results: IndexedRepresentation = HashMap::new();
 
-    let flattened_uccs: Vec<(String, Vec<usize>, HashMap<usize, HashSet<Row>>)> =
-        unique_column_combinations
-            .iter()
-            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
-                curr_uccs.into_iter().for_each(|ucc| {
-                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
-                });
+    let unique_column_combinations: UniqueColumnCombinations = unique_column_combinations
+        .iter()
+        .map(|(symbol, ucc_set)| {
+            (
+                symbol.clone(),
+                ucc_set
+                    .into_iter()
+                    .map(|ucc| {
+                        let mut ucc = ucc.clone();
+                        ucc.sort();
 
-                acc
-            });
-
-    let index: Vec<_> = flattened_uccs
-        .into_par_iter()
-        .map(|(sym, ucc, mut ucc_index)| {
-            if !ucc.is_empty() {
-                if let Some(hashes) = facts_by_relation.inner.get(&sym) {
-                    for hash in hashes {
-                        let fact = fact_registry.get(*hash);
-                        let mut projected_row = vec![None; fact.len()];
-
-                        // Perform the projection using the unique columns.
-                        for &column_index in &ucc {
-                            if column_index < fact.len() {
-                                projected_row[column_index] = Some(&fact[column_index]);
-                            }
-                        }
-
-                        let current_masked_atoms =
-                            ucc_index.entry(hashisher(&projected_row)).or_default();
-                        current_masked_atoms.insert(*hash);
-                    }
-                }
-            }
-
-            (sym, ucc, ucc_index)
+                        ucc
+                    })
+                    .collect::<HashSet<_>>(),
+            )
         })
         .collect();
 
-    index.into_iter().for_each(|(sym, ucc, ucc_index)| {
-        let sym_uccs = results.entry(sym).or_default();
-        let ucc_projections = sym_uccs.entry(ucc).or_default();
+    let flattened_uccs: Vec<(String, Vec<usize>, Row, HashSet<Row>)> = unique_column_combinations
+        .iter()
+        .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+            curr_uccs.into_iter().for_each(|ucc| {
+                let masked_facts =
+                    facts_by_relation
+                        .inner
+                        .get(curr_sym)
+                        .unwrap()
+                        .iter()
+                        .map(|fact| {
+                            let fact = fact_registry.get(*fact);
 
-        *ucc_projections = ucc_index;
-    });
+                            let mut projected_fact = vec![None; fact.len()];
+
+                            // Perform the projection using the unique columns.
+                            for &column_index in ucc {
+                                if column_index < fact.len() {
+                                    projected_fact[column_index] = Some(&fact[column_index]);
+                                }
+                            }
+
+                            hashisher(&projected_fact)
+                        });
+
+                masked_facts.into_iter().for_each(|masked_fact| {
+                    acc.push((
+                        curr_sym.clone(),
+                        ucc.clone(),
+                        masked_fact,
+                        HashSet::default(),
+                    ));
+                })
+            });
+
+            acc
+        });
+
+    // sym: Delta_T, ucc: [1, 2], ucc_index: HashMap<usize, HashSet<Row>>
+    // [1, 2] - [b, c] - [a, b, c], ...
+    // [1, 2] - [b, c] - [d, b, c], ...
+    // [0, 1] - [a, b] - [a, b, c], ...
+    // [0]    - [1, 2] - [2, 1],    ...
+    // sym: Delta_T, ucc: [0], [b, c], ucc_index: HashSet<Row>
+    let index: Vec<_> = flattened_uccs
+        .into_par_iter()
+        .map(|(sym, ucc, masked_row, mut ucc_index)| {
+            if !ucc.is_empty() {
+                if let Some(hashes) = facts_by_relation.inner.get(&sym) {
+                    hashes.iter().for_each(|hash| {
+                        ucc_index.insert(*hash);
+                    });
+                }
+            }
+
+            (sym, ucc, masked_row, ucc_index)
+        })
+        .collect();
+    /*let index: Vec<_> = flattened_uccs
+    .into_par_iter()
+    .map(|(sym, ucc, mut ucc_index)| {
+        if !ucc.is_empty() {
+            if let Some(hashes) = facts_by_relation.inner.get(&sym) {
+                hashes.iter().for_each(|hash| {
+                    let fact = fact_registry.get(*hash);
+                    let mut projected_row = vec![None; fact.len()];
+
+                    // Perform the projection using the unique columns.
+                    for &column_index in &ucc {
+                        if column_index < fact.len() {
+                            projected_row[column_index] = Some(&fact[column_index]);
+                        }
+                    }
+
+                    let mut current_masked_atoms =
+                        ucc_index.entry(hashisher(&projected_row)).or_default();
+                    current_masked_atoms.insert(*hash);
+                });
+            }
+        }
+
+        (sym, ucc, ucc_index)
+    })
+    .collect();*/
+
+    index
+        .into_iter()
+        .for_each(|(sym, ucc, masked_row, ucc_index)| {
+            let sym_uccs = results.entry(sym).or_default();
+            let ucc_projections = sym_uccs.entry(ucc).or_default();
+            let row_set = ucc_projections.entry(masked_row).or_default();
+
+            *row_set = ucc_index;
+        });
 
     results
 }

@@ -37,7 +37,16 @@ impl<'a> RuleEvaluator<'a> {
     // would emit facts faster than breadth-first (which defers until all of them are ready to be
     // emitted)
     pub fn step(&self) -> impl Iterator<Item = AnonymousGroundAtom> + 'a {
-        let join_sequence = self.join_order;
+        let join_sequence: Vec<_> = self
+            .join_order
+            .iter()
+            .map(|join_key| {
+                let mut local_join_key = join_key.clone();
+                local_join_key.sort();
+
+                return local_join_key;
+            })
+            .collect();
 
         let (interned_rule, id_translator) = intern_rule(self.rule.clone());
 
@@ -52,7 +61,7 @@ impl<'a> RuleEvaluator<'a> {
                 .inner
                 .get(id_translator.get(&current_body_atom.symbol).unwrap())
                 .unwrap();
-            let matches_by_positions = matches_by_symbol.get(join_key).unwrap();
+            let matches_by_positions = matches_by_symbol.get(&join_key).unwrap();
 
             let mut new_rewrites = vec![];
             let now = Instant::now();

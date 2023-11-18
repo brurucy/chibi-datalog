@@ -6,11 +6,10 @@ use std::hash::{Hash, Hasher};
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct Row(u64);
 
-fn hashisher(key: &AnonymousGroundAtom) -> Row {
+pub fn hashisher<K: Hash>(key: &Vec<K>) -> Row {
     let mut hasher = AHasher::default();
 
-    key.iter()
-        .for_each(|masked_value| masked_value.hash(&mut hasher));
+    key.iter().for_each(|value| value.hash(&mut hasher));
 
     Row(hasher.finish())
 }
