@@ -3,6 +3,7 @@ use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
 use ahash::{AHasher, HashMap, HashMapExt, HashSet};
 use datalog_syntax::{AnonymousGroundAtom, TypedValue};
+use rayon::prelude::*;
 use std::hash::{Hash, Hasher};
 
 pub type MaskedAtom<'a> = Vec<Option<&'a TypedValue>>;
@@ -39,41 +40,53 @@ fn index<'a>(
 ) -> IndexedRepresentation<'a> {
     let mut results: IndexedRepresentation<'a> = HashMap::new();
 
-    let mut total = 0;
-    let mut useless = 0;
-    for (symbol, uccs) in unique_column_combinations.iter() {
-        let current_relation_entry = results.entry(symbol.clone()).or_default();
-        uccs.iter().for_each(|ucc| {
-            let current_ucc_entry = current_relation_entry.entry(ucc.clone()).or_default();
+    let flattened_uccs: Vec<(
+        String,
+        Vec<usize>,
+        HashMap<usize, HashSet<&'a AnonymousGroundAtom>>,
+    )> = unique_column_combinations
+        .iter()
+        .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+            curr_uccs.into_iter().for_each(|ucc| {
+                acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+            });
 
-            // It is pointless to index empty join keys, since it will just clone the whole relation instead of a column subset
+            acc
+        });
+
+    let index: Vec<_> = flattened_uccs
+        .into_par_iter()
+        .map(|(sym, ucc, mut ucc_index)| {
             if !ucc.is_empty() {
-                if let Some(facts) = facts_by_relation.inner.get(symbol) {
+                if let Some(facts) = facts_by_relation.inner.get(&sym) {
                     for fact in facts {
                         let mut projected_row = vec![None; fact.len()];
 
                         // Perform the projection using the unique columns.
-                        for &column_index in ucc {
+                        for &column_index in &ucc {
                             if column_index < fact.len() {
                                 projected_row[column_index] = Some(&fact[column_index]);
                             }
                         }
 
-                        let current_masked_atoms = current_ucc_entry
-                            .entry(hashisher(&projected_row))
-                            .or_default();
-                        total += 1;
-                        let wasteful = current_masked_atoms.insert(fact);
-                        if !wasteful {
-                            useless += 1;
-                        }
+                        let current_masked_atoms =
+                            ucc_index.entry(hashisher(&projected_row)).or_default();
+                        current_masked_atoms.insert(fact);
                     }
                 }
             }
-        });
-    }
 
-    println!("total: {}, wasteful: {}", total, useless);
+            (sym, ucc, ucc_index)
+        })
+        .collect();
+
+    index.into_iter().for_each(|(sym, ucc, ucc_index)| {
+        let sym_uccs = results.entry(sym).or_default();
+        let ucc_projections = sym_uccs.entry(ucc).or_default();
+
+        *ucc_projections = ucc_index;
+    });
+
     results.iter().for_each(|(sym, outer)| {
         outer.iter().for_each(|(positions, contents)| {
             println!(
