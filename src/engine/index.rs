@@ -1,9 +1,8 @@
 use crate::engine::program_index::UniqueColumnCombinations;
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
-use crate::interning::fact_registry::FactRegistry;
+use crate::interning::fact_registry::{FactRegistry, Row};
 use ahash::{AHasher, HashMap, HashMapExt, HashSet};
-use datalog_syntax::{AnonymousGroundAtom, TypedValue};
 use rayon::prelude::*;
 use std::hash::{Hash, Hasher};
 
@@ -30,32 +29,27 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
     hasher.finish() as usize
 }
 
-pub type IndexedRepresentation<'a> =
-    HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<&'a AnonymousGroundAtom>>>>;
+pub type IndexedRepresentation = HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<Row>>>>;
 
-fn index<'a>(
+fn index(
     unique_column_combinations: &UniqueColumnCombinations,
-    facts_by_relation: &'a RelationStorage,
-    fact_registry: &'a FactRegistry,
-) -> IndexedRepresentation<'a> {
-    let mut results: IndexedRepresentation<'a> = HashMap::new();
+    facts_by_relation: &RelationStorage,
+    fact_registry: &FactRegistry,
+) -> IndexedRepresentation {
+    let mut results: IndexedRepresentation = HashMap::new();
 
-    let flattened_uccs: Vec<(
-        String,
-        Vec<usize>,
-        HashMap<usize, HashSet<&'a AnonymousGroundAtom>>,
-    )> = unique_column_combinations
-        .iter()
-        .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
-            curr_uccs.into_iter().for_each(|ucc| {
-                acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+    let flattened_uccs: Vec<(String, Vec<usize>, HashMap<usize, HashSet<Row>>)> =
+        unique_column_combinations
+            .iter()
+            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+                curr_uccs.into_iter().for_each(|ucc| {
+                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+                });
+
+                acc
             });
 
-            acc
-        });
-
     let index: Vec<_> = flattened_uccs
-        // Has to be parallel
         .into_par_iter()
         .map(|(sym, ucc, mut ucc_index)| {
             if !ucc.is_empty() {
@@ -73,7 +67,7 @@ fn index<'a>(
 
                         let current_masked_atoms =
                             ucc_index.entry(hashisher(&projected_row)).or_default();
-                        current_masked_atoms.insert(fact);
+                        current_masked_atoms.insert(*hash);
                     }
                 }
             }
@@ -92,11 +86,30 @@ fn index<'a>(
     results
 }
 
-pub struct Index<'a> {
-    pub inner: IndexedRepresentation<'a>,
+fn update(
+    unique_column_combinations: &UniqueColumnCombinations,
+    facts_by_relation: &RelationStorage,
+    fact_registry: &FactRegistry,
+) {
+    let mut results: IndexedRepresentation = HashMap::new();
+
+    let flattened_uccs: Vec<(String, Vec<usize>, HashMap<usize, HashSet<Row>>)> =
+        unique_column_combinations
+            .iter()
+            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+                curr_uccs.into_iter().for_each(|ucc| {
+                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+                });
+
+                acc
+            });
 }
 
-impl<'a> Index<'a> {
+pub struct Index {
+    pub inner: IndexedRepresentation,
+}
+
+impl<'a> Index {
     pub fn new(
         relation_storage: &'a RelationStorage,
         uccs: &'a UniqueColumnCombinations,

@@ -29,7 +29,6 @@ impl ChibiRuntime {
     pub fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) -> bool {
         self.unprocessed_insertions
             .insert(relation, ground_atom.clone());
-        self.processed.register(ground_atom);
 
         true
     }
@@ -129,13 +128,13 @@ impl ChibiRuntime {
                     // We dump all unprocessed EDB relations into delta EDB relations
                     self.processed
                         // This clone hurts.
-                        .insert_hashed(
+                        .insert_registered(
                             &format!("{}{}", DELTA_PREFIX, relation_symbol),
                             unprocessed_facts.clone().into_iter(),
                         );
                     // And in their respective place
                     self.processed
-                        .insert_hashed(relation_symbol, unprocessed_facts.into_iter());
+                        .insert_registered(relation_symbol, unprocessed_facts.into_iter());
                 },
             );
 

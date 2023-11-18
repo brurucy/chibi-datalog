@@ -3,22 +3,25 @@ use datalog_syntax::AnonymousGroundAtom;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 
-fn hashisher(key: &AnonymousGroundAtom) -> usize {
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+pub struct Row(u64);
+
+fn hashisher(key: &AnonymousGroundAtom) -> Row {
     let mut hasher = AHasher::default();
 
     key.iter()
         .for_each(|masked_value| masked_value.hash(&mut hasher));
 
-    hasher.finish() as usize
+    Row(hasher.finish())
 }
 
 #[derive(Default)]
 pub struct FactRegistry {
-    inner: HashMap<usize, AnonymousGroundAtom>,
+    inner: HashMap<Row, AnonymousGroundAtom>,
 }
 
 impl FactRegistry {
-    pub fn register(&mut self, fact: AnonymousGroundAtom) -> usize {
+    pub fn register(&mut self, fact: AnonymousGroundAtom) -> Row {
         let hash = hashisher(&fact);
 
         return match self.inner.entry(hash) {
@@ -31,15 +34,21 @@ impl FactRegistry {
             }
         };
     }
-    pub fn compute_key(&self, fact: &AnonymousGroundAtom) -> usize {
+    pub fn compute_key(&self, fact: &AnonymousGroundAtom) -> Row {
         hashisher(fact)
     }
-    pub fn get(&self, hash: usize) -> &AnonymousGroundAtom {
+    pub fn get(&self, hash: Row) -> &AnonymousGroundAtom {
         return self.inner.get(&hash).unwrap();
     }
     pub fn contains(&self, fact: &AnonymousGroundAtom) -> bool {
         let key = self.compute_key(fact);
 
         self.inner.contains_key(&key)
+    }
+    pub fn remove(&mut self, hash: Row) -> AnonymousGroundAtom {
+        self.inner.remove(&hash).unwrap()
+    }
+    pub fn insert_registered(&mut self, hash: Row, fact: AnonymousGroundAtom) {
+        self.inner.insert(hash, fact);
     }
 }

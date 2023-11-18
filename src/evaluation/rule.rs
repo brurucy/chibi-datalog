@@ -10,7 +10,7 @@ pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
     facts_storage: &'a RelationStorage,
     join_order: &'a JoinOrder,
-    index: &'a Index<'a>,
+    index: &'a Index,
     fact_registry: &'a FactRegistry,
 }
 
@@ -83,8 +83,11 @@ impl<'a> RuleEvaluator<'a> {
                         let masked_atom = mask_atom(&unification_target);
                         if let Some(matches_by_mask) = matches_by_positions.get(&masked_atom) {
                             matches_by_mask.iter().for_each(|current_ground_atom| {
-                                let new_rewrite =
-                                    unify(&unification_target, current_ground_atom).unwrap();
+                                let new_rewrite = unify(
+                                    &unification_target,
+                                    self.fact_registry.get(*current_ground_atom),
+                                )
+                                .unwrap();
 
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);

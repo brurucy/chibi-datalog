@@ -2,14 +2,12 @@ use crate::engine::index::Index;
 use crate::engine::program_index::{ProgramIndex, RuleJoinOrders, UniqueColumnCombinations};
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
-use crate::interning::fact_registry::FactRegistry;
+use crate::interning::fact_registry::{FactRegistry, Row};
 use ahash::{HashMap, HashSet, HashSetExt};
 use datalog_syntax::{AnonymousGroundAtom, Program};
-use lasso::Rodeo;
 use rayon::prelude::*;
 use std::time::Instant;
 
-pub type Row = usize;
 pub type FactStorage = HashSet<Row>;
 #[derive(Default)]
 pub struct RelationStorage {
@@ -24,10 +22,18 @@ impl RelationStorage {
     pub fn drain_relation(&mut self, relation_symbol: &str) -> impl Iterator<Item = Row> + '_ {
         self.inner.get_mut(relation_symbol).unwrap().drain()
     }
-    pub fn drain_all_relations(&mut self) -> impl Iterator<Item = (&String, Vec<Row>)> + '_ {
-        self.inner
-            .iter_mut()
-            .map(|(relation_symbol, facts)| (relation_symbol, facts.drain().collect::<Vec<_>>()))
+    pub fn drain_all_relations(
+        &mut self,
+    ) -> impl Iterator<Item = (&String, Vec<(Row, AnonymousGroundAtom)>)> + '_ {
+        self.inner.iter_mut().map(|(relation_symbol, facts)| {
+            (
+                relation_symbol,
+                facts
+                    .drain()
+                    .map(|hash| (hash, self.fact_registry.remove(hash)))
+                    .collect::<Vec<_>>(),
+            )
+        })
     }
     pub fn drain_prefix_filter<'a>(
         &'a mut self,
@@ -133,7 +139,19 @@ impl RelationStorage {
         }
     }
 
-    pub fn insert_hashed(&mut self, relation_symbol: &str, hashes: impl Iterator<Item = Row>) {
+    pub fn insert_registered(
+        &mut self,
+        relation_symbol: &str,
+        registrations: impl Iterator<Item = (Row, AnonymousGroundAtom)>,
+    ) {
+        let mut hashes = vec![];
+
+        registrations.into_iter().for_each(|(hash, fact)| {
+            self.fact_registry.insert_registered(hash, fact);
+
+            hashes.push(hash);
+        });
+
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
             relation.extend(hashes)
         } else {
