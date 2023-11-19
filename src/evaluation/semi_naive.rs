@@ -16,25 +16,23 @@ pub fn semi_naive_evaluation(
     let nonrecursive_program_index = ProgramIndex::from(vec![nonrecursive_delta_program]);
     let recursive_program_index = ProgramIndex::from(vec![recursive_delta_program]);
 
-    let now = Instant::now();
     let mut index = Index::new(
         &relation_storage,
         &nonrecursive_program_index.unique_program_column_combinations,
         &relation_storage.fact_registry,
     );
-    println!("Index setup: {} milis", now.elapsed().as_millis());
+
     relation_storage.materialize_delta_program(
         &nonrecursive_delta_program,
         nonrecursive_join_order,
         &index,
     );
-    let now = Instant::now();
+
     index.update(
         &recursive_program_index.unique_program_column_combinations,
         &relation_storage,
         &relation_storage.fact_registry,
     );
-    println!("Update 1: {} milis", now.elapsed().as_millis());
 
     loop {
         let previous_non_delta_fact_count = relation_storage.len();
@@ -45,13 +43,11 @@ pub fn semi_naive_evaluation(
             &index,
         );
 
-        let now = Instant::now();
         index.update(
             &recursive_program_index.unique_program_column_combinations,
             &relation_storage,
             &relation_storage.fact_registry,
         );
-        println!("Update n: {} milis", now.elapsed().as_millis());
 
         let current_non_delta_fact_count = relation_storage.len();
 

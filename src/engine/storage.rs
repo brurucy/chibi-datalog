@@ -248,16 +248,13 @@ impl RelationStorage {
             })
             .collect();
 
-        let now = Instant::now();
         let evaluation = evaluation_setup
             .into_par_iter()
             .map(|(delta_relation_symbol, rule)| {
                 (delta_relation_symbol, rule.step().collect::<Vec<_>>())
             })
             .collect::<Vec<_>>();
-        println!("evaluation time: {} milis", now.elapsed().as_millis());
 
-        let now = Instant::now();
         evaluation.into_iter().enumerate().for_each(
             |(idx, (delta_relation_symbol, current_delta_evaluation))| {
                 let self_mut_ref = self as *mut Self;
@@ -289,7 +286,6 @@ impl RelationStorage {
                 );
             },
         );
-        println!("post-evaluation: {} milis", now.elapsed().as_millis());
     }
 
     pub fn len(&self) -> usize {
