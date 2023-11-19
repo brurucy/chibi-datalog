@@ -5,6 +5,7 @@ use crate::engine::storage::RelationStorage;
 use crate::interning::fact_registry::FactRegistry;
 use ascent::internal::Instant;
 use datalog_syntax::{AnonymousGroundAtom, Rule};
+use rayon::prelude::*;
 
 pub struct RuleEvaluator<'a> {
     rule: &'a Rule,
@@ -47,10 +48,11 @@ impl<'a> RuleEvaluator<'a> {
         for (current_body_atom, join_key) in
             interned_rule.body.iter().zip(join_sequence.into_iter())
         {
-            let mut new_rewrites = vec![];
+            let mut new_rewrites = boxcar::vec![];
             let now = Instant::now();
             current_rewrites
                 .drain(..)
+                //.with_min_len(10000)
                 .map(|rewrite| (rewrite.apply(current_body_atom), rewrite))
                 .for_each(|(unification_target, rewrite)| {
                     // If it is empty, then this is the first body atom. In this case, do a join.
@@ -60,17 +62,19 @@ impl<'a> RuleEvaluator<'a> {
                             .get_relation(id_translator.get(&unification_target.symbol).unwrap())
                             .unwrap();
 
-                        current_relation.iter().for_each(|current_ground_atom| {
-                            if let Some(new_rewrite) = unify(
-                                &unification_target,
-                                self.fact_registry.get(*current_ground_atom),
-                            ) {
-                                let mut local_rewrite = rewrite.clone();
-                                local_rewrite.extend(new_rewrite);
+                        current_relation
+                            .into_iter()
+                            .for_each(|current_ground_atom| {
+                                if let Some(new_rewrite) = unify(
+                                    &unification_target,
+                                    self.fact_registry.get(*current_ground_atom),
+                                ) {
+                                    let mut local_rewrite = rewrite.clone();
+                                    local_rewrite.extend(new_rewrite);
 
-                                new_rewrites.push(local_rewrite);
-                            };
-                        });
+                                    new_rewrites.push(local_rewrite);
+                                };
+                            });
                     } else {
                         let matches_by_symbol = self
                             .index

@@ -1,5 +1,5 @@
 use crate::engine::index::Index;
-use crate::engine::program_index::{ProgramIndex, RuleJoinOrders, UniqueColumnCombinations};
+use crate::engine::program_index::RuleJoinOrders;
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use crate::interning::fact_registry::{FactRegistry, Row};
