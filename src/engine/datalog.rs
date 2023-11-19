@@ -3,7 +3,7 @@ use crate::engine::storage::RelationStorage;
 use crate::evaluation::query::pattern_match;
 use crate::evaluation::semi_naive::semi_naive_evaluation;
 use crate::helpers::helpers::{
-    add_prefix, split_program, DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX,
+    split_program, DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX,
 };
 use crate::program_transformations::delta_program::make_delta_program;
 use crate::program_transformations::dred::{make_overdeletion_program, make_rederivation_program};
@@ -125,13 +125,10 @@ impl ChibiRuntime {
             // Additions
             self.unprocessed_insertions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
-                    // We dump all unprocessed EDB relations into delta EDB relations
-                    self.processed
-                        // This clone hurts.
-                        .insert_registered(
-                            &format!("{}{}", DELTA_PREFIX, relation_symbol),
-                            unprocessed_facts.clone().into_iter(),
-                        );
+                    self.processed.insert_registered(
+                        &format!("{}{}", DELTA_PREFIX, relation_symbol),
+                        unprocessed_facts.clone().into_iter(),
+                    );
                     // And in their respective place
                     self.processed
                         .insert_registered(relation_symbol, unprocessed_facts.into_iter());
