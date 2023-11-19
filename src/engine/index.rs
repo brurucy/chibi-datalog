@@ -57,7 +57,7 @@ fn index(
         .map(|(sym, ucc, ucc_index)| {
             if !ucc.is_empty() {
                 if let Some(hashes) = facts_by_relation.inner.get(&sym) {
-                    for hash in hashes {
+                    for hash in hashes.value() {
                         let fact = fact_registry.get(*hash);
                         let mut projected_row = vec![None; fact.len()];
 

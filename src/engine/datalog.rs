@@ -63,23 +63,18 @@ impl ChibiRuntime {
     pub fn query<'a>(
         &'a self,
         query: &'a Query,
-    ) -> Result<impl Iterator<Item = &AnonymousGroundAtom>, String> {
+    ) -> Result<impl Iterator<Item = &AnonymousGroundAtom> + 'a, String> {
         if !self.safe() {
             return Err("poll needed to obtain correct results".to_string());
         }
-
-        Ok(self
+        return Ok(self
             .processed
-            .inner
-            .get(query.symbol)
-            .unwrap()
+            .get_relation(query.symbol)
             .iter()
             .map(|fact| self.processed.fact_registry.get(*fact))
-            .filter(|fact| pattern_match(query, fact)))
+            .filter(|fact| pattern_match(query, fact)));
     }
     pub fn poll(&mut self) {
-        let global_uccs = &self.program_index.unique_program_column_combinations;
-
         if !self.unprocessed_deletions.is_empty() {
             /*self.unprocessed_deletions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
@@ -134,7 +129,7 @@ impl ChibiRuntime {
                         );
                     // And in their respective place
                     self.processed
-                        .insert_registered(relation_symbol, unprocessed_facts.into_iter());
+                        .insert_registered(&relation_symbol, unprocessed_facts.into_iter());
                 },
             );
 
