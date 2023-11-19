@@ -1,15 +1,15 @@
 # Chibi Datalog
 
-Chibi Datalog is a smol positive datalog engine (there's nothing stopping negation to be implemented...aside from time)
-that is incremental to both additions of data, and removals. It seems to be the first? fully incremental datalog 
+Chibi Datalog is a smol positive datalog engine (there's nothing stopping negation from being implemented...aside from time)
+that is incremental with respect to both additions and retractions of facts. It seems to be the first? fully incremental datalog 
 interpreter.
 
 It is **very much** still in development though. Right now we (me and [namibj](https://github.com/namibj)) are focused
-in figuring out why does it perform so poorly in highly iterative programs. 
+in figuring out why does it perform so poorly in highly-iterative programs. 
 
-Tl;dr, don't use it. Or use it at your own risk. No guarantees attached.
+Tl;dr, don't use it. Or use it at your own risk. No guarantees attached. It is less than alpha quality software.
 
-The following snippets showcase `ChibiDatalog` in action. This is one of the two integration tests of the engine.
+The following snippets showcase the engine in action
 ```rust
 #[cfg(test)]
 mod tests {
@@ -122,14 +122,14 @@ mod tests {
 }
 ```
 
-In case you are interested in performance, there is a very simple benchmark under `./src/bin.rs`. It compares ChibiDatalog
+In case you are interested in performance, there is a very simple benchmark under `./src/bin.rs`. It compares `ChibiDatalog`
 with [ascent](https://github.com/s-arash/ascent) and [crepe](https://github.com/ekzhang/crepe)
 
-In order to run it, clone the project, extract `./data/lubm1.nt.gz`, then:
+To run it, clone the project, extract `./data/lubm1.nt.gz`, and then:
 ```shell
 cargo run --release
 ```
 
 ### Next up
 
-1. Figure out why does it suck with large TC programs (run ./data/graph1000.txt, you can uncomment that test in `./bin.rs)
+1. Figure out why does it suck with large TC programs (uncomment the first test in `./src/bin.rs to see what I'm talking about)
