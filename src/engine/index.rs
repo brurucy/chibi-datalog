@@ -57,7 +57,7 @@ fn index(
         .map(|(sym, ucc, ucc_index)| {
             if !ucc.is_empty() {
                 if let Some(hashes) = facts_by_relation.inner.get(&sym) {
-                    for hash in hashes {
+                    for hash in hashes.value() {
                         let fact = fact_registry.get(*hash);
                         let mut projected_row = vec![None; fact.len()];
 
@@ -150,7 +150,7 @@ impl<'a> Index {
                 let ucc_index = self.inner.get(&sym).unwrap().get(&ucc).unwrap();
 
                 if let Some(hashes) = facts_by_relation.inner.get(&local_symbol) {
-                    hashes.into_par_iter().for_each(|hash| {
+                    hashes.par_iter().for_each(|hash| {
                         let fact = fact_registry.get(*hash);
                         let mut projected_row = vec![None; fact.len()];
 

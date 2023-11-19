@@ -27,23 +27,19 @@ pub struct ChibiRuntime {
 
 impl ChibiRuntime {
     pub fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) -> bool {
-        self.unprocessed_insertions
-            .insert(relation, ground_atom.clone());
-
-        true
+        self.unprocessed_insertions.insert(relation, ground_atom)
     }
     pub fn remove(&mut self, query: &Query) {
-        /*self.processed
-        .inner
-        .get(query.symbol)
-        .unwrap()
-        .iter()
-        .for_each(|fact| {
-            if pattern_match(query, fact) {
-                self.unprocessed_deletions
-                    .insert(query.symbol, fact.clone());
-            }
-        })*/
+        let deletion_targets: Vec<_> = self
+            .processed
+            .get_relation(query.symbol)
+            .iter()
+            .map(|hash| (*hash, self.processed.fact_registry.get(*hash).clone()))
+            .filter(|(hash, fact)| pattern_match(query, fact))
+            .collect();
+
+        self.unprocessed_deletions
+            .insert_registered(query.symbol, deletion_targets.into_iter());
     }
     pub fn contains(
         &self,
@@ -63,31 +59,28 @@ impl ChibiRuntime {
     pub fn query<'a>(
         &'a self,
         query: &'a Query,
-    ) -> Result<impl Iterator<Item = &AnonymousGroundAtom>, String> {
+    ) -> Result<impl Iterator<Item = &AnonymousGroundAtom> + 'a, String> {
         if !self.safe() {
             return Err("poll needed to obtain correct results".to_string());
         }
-
-        Ok(self
+        return Ok(self
             .processed
-            .inner
-            .get(query.symbol)
-            .unwrap()
+            .get_relation(query.symbol)
             .iter()
             .map(|fact| self.processed.fact_registry.get(*fact))
-            .filter(|fact| pattern_match(query, fact)))
+            .filter(|fact| pattern_match(query, fact)));
     }
     pub fn poll(&mut self) {
-        let global_uccs = &self.program_index.unique_program_column_combinations;
-
         if !self.unprocessed_deletions.is_empty() {
-            /*self.unprocessed_deletions.drain_all_relations().for_each(
+            self.unprocessed_deletions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
                     let mut overdeletion_symbol = relation_symbol.clone();
                     add_prefix(&mut overdeletion_symbol, OVERDELETION_PREFIX);
 
-                    self.processed
-                        .insert_all(&overdeletion_symbol, unprocessed_facts.into_iter());
+                    self.processed.insert_all(
+                        &overdeletion_symbol,
+                        unprocessed_facts.into_iter().map(|(hash, _)| hash),
+                    );
                 },
             );
 
@@ -99,7 +92,6 @@ impl ChibiRuntime {
                 &self.recursive_delta_overdeletion_program,
                 nonrecursive_delta_overdeletion_join_orders,
                 recursive_delta_overdeletion_join_orders,
-                global_uccs,
             );
             self.processed.drain_deltas();
             self.processed.overdelete();
@@ -113,28 +105,25 @@ impl ChibiRuntime {
                 &self.recursive_delta_rederivation_program,
                 nonrecursive_delta_rederivation_join_orders,
                 recursive_delta_rederivation_join_orders,
-                global_uccs,
             );
             self.processed.drain_deltas();
             self.processed.rederive();
 
             self.processed.clear_prefix(OVERDELETION_PREFIX);
-            self.processed.clear_prefix(REDERIVATION_PREFIX);*/
+            self.processed.clear_prefix(REDERIVATION_PREFIX);
         }
         if !self.unprocessed_insertions.is_empty() {
             // Additions
             self.unprocessed_insertions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
                     // We dump all unprocessed EDB relations into delta EDB relations
-                    self.processed
-                        // This clone hurts.
-                        .insert_registered(
-                            &format!("{}{}", DELTA_PREFIX, relation_symbol),
-                            unprocessed_facts.clone().into_iter(),
-                        );
+                    self.processed.insert_registered(
+                        &format!("{}{}", DELTA_PREFIX, relation_symbol),
+                        unprocessed_facts.clone().into_iter(),
+                    );
                     // And in their respective place
                     self.processed
-                        .insert_registered(relation_symbol, unprocessed_facts.into_iter());
+                        .insert_registered(&relation_symbol, unprocessed_facts.into_iter());
                 },
             );
 

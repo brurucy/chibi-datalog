@@ -1,9 +1,9 @@
-use ahash::{AHasher, HashMap};
+use ahash::{AHashMap, AHasher};
 use datalog_syntax::AnonymousGroundAtom;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Row(pub u64);
 
 fn hashisher(key: &AnonymousGroundAtom) -> Row {
@@ -17,7 +17,7 @@ fn hashisher(key: &AnonymousGroundAtom) -> Row {
 
 #[derive(Default)]
 pub struct FactRegistry {
-    inner: HashMap<Row, AnonymousGroundAtom>,
+    inner: AHashMap<Row, AnonymousGroundAtom>,
 }
 
 impl FactRegistry {

@@ -3,7 +3,7 @@ use crate::engine::program_index::RuleJoinOrders;
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use crate::interning::fact_registry::{FactRegistry, Row};
-use ahash::{HashMap, HashSet};
+use dashmap::{DashMap, Map};
 use datalog_syntax::{AnonymousGroundAtom, Program};
 use indexmap::IndexSet;
 use rayon::prelude::*;
@@ -12,24 +12,34 @@ use std::time::Instant;
 pub type FactStorage = IndexSet<Row, ahash::RandomState>;
 #[derive(Default)]
 pub struct RelationStorage {
-    pub(crate) inner: HashMap<String, FactStorage>,
+    pub(crate) inner: DashMap<String, FactStorage>,
     pub(crate) fact_registry: FactRegistry,
 }
 
 impl RelationStorage {
-    pub fn get_relation(&self, relation_symbol: &str) -> Option<&FactStorage> {
-        return self.inner.get(relation_symbol);
+    pub fn get_relation(&self, relation_symbol: &str) -> &FactStorage {
+        let shard = self.inner.determine_map(relation_symbol);
+        let shard_map = unsafe { self.inner._get_read_shard(shard) };
+
+        return shard_map.get(relation_symbol).unwrap().get();
     }
-    pub fn drain_relation(&mut self, relation_symbol: &str) -> impl Iterator<Item = Row> + '_ {
-        self.inner.get_mut(relation_symbol).unwrap().drain(..)
+    pub fn drain_relation(&self, relation_symbol: &str) -> Vec<Row> {
+        let mut rel = self.inner.get_mut(relation_symbol).unwrap();
+
+        return rel.drain(..).collect();
     }
     pub fn drain_all_relations(
         &mut self,
-    ) -> impl Iterator<Item = (&String, Vec<(Row, AnonymousGroundAtom)>)> + '_ {
-        self.inner.iter_mut().map(|(relation_symbol, facts)| {
+    ) -> impl Iterator<Item = (String, Vec<(Row, AnonymousGroundAtom)>)> + '_ {
+        let relations_to_be_drained: Vec<_> =
+            self.inner.iter().map(|pair| pair.key().clone()).collect();
+
+        relations_to_be_drained.into_iter().map(|relation_symbol| {
             (
-                relation_symbol,
-                facts
+                relation_symbol.clone(),
+                self.inner
+                    .get_mut(&relation_symbol)
+                    .unwrap()
                     .drain(..)
                     .map(|hash| (hash, self.fact_registry.remove(hash)))
                     .collect::<Vec<_>>(),
@@ -39,30 +49,40 @@ impl RelationStorage {
     pub fn drain_prefix_filter<'a>(
         &'a mut self,
         prefix: &'a str,
-    ) -> impl Iterator<Item = (&String, Vec<Row>)> + '_ {
-        return self
+    ) -> impl Iterator<Item = (String, Vec<Row>)> + '_ {
+        let relations_to_be_drained: Vec<_> = self
             .inner
-            .iter_mut()
-            .filter(move |(relation_symbol, _)| relation_symbol.contains(prefix))
-            .map(|(relation_symbol, facts)| {
-                (relation_symbol, facts.drain(..).collect::<Vec<_>>())
-            });
+            .iter()
+            .map(|pair| pair.key().clone())
+            .filter(|relation_symbol| relation_symbol.starts_with(prefix))
+            .collect();
+
+        relations_to_be_drained.into_iter().map(|relation_symbol| {
+            (
+                relation_symbol.clone(),
+                self.inner
+                    .get_mut(&relation_symbol)
+                    .unwrap()
+                    .drain(..)
+                    .collect::<Vec<_>>(),
+            )
+        })
     }
     pub fn drain_deltas(&mut self) {
         let delta_relation_symbols: Vec<_> = self
             .inner
-            .keys()
+            .iter()
+            .map(|pair| pair.key().clone())
             .filter(|relation_symbol| relation_symbol.starts_with(DELTA_PREFIX))
-            .cloned()
             .collect();
 
         delta_relation_symbols
             .into_iter()
             .for_each(|relation_symbol| {
                 if relation_symbol.starts_with(DELTA_PREFIX) {
-                    let delta_facts: Vec<_> = self.drain_relation(&relation_symbol).collect();
+                    let delta_facts: Vec<_> = self.drain_relation(&relation_symbol);
 
-                    let current_non_delta_relation = self
+                    let mut current_non_delta_relation = self
                         .inner
                         .get_mut(relation_symbol.strip_prefix(DELTA_PREFIX).unwrap())
                         .unwrap();
@@ -77,11 +97,12 @@ impl RelationStorage {
         let overdeletion_relations: Vec<_> = self
             .inner
             .iter()
-            .filter(|(symbol, _)| symbol.starts_with(OVERDELETION_PREFIX))
-            .map(|(symbol, _)| {
+            .filter(|ref_multi| ref_multi.key().starts_with(OVERDELETION_PREFIX))
+            .map(|ref_multi| {
                 (
-                    symbol.clone(),
-                    symbol
+                    ref_multi.key().clone(),
+                    ref_multi
+                        .key()
                         .strip_prefix(&OVERDELETION_PREFIX)
                         .unwrap()
                         .to_string(),
@@ -91,8 +112,8 @@ impl RelationStorage {
 
         overdeletion_relations.into_iter().for_each(
             |(overdeletion_symbol, actual_relation_symbol)| {
-                let overdeletion_relation = self.inner.remove_entry(&overdeletion_symbol).unwrap();
-                let actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
+                let overdeletion_relation = self.inner.remove(&overdeletion_symbol).unwrap();
+                let mut actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
 
                 overdeletion_relation.1.iter().for_each(|atom| {
                     actual_relation.remove(atom);
@@ -108,11 +129,12 @@ impl RelationStorage {
         let rederivation_relations: Vec<_> = self
             .inner
             .iter()
-            .filter(|(symbol, _)| symbol.starts_with(REDERIVATION_PREFIX))
-            .map(|(symbol, _)| {
+            .filter(|ref_multi| ref_multi.key().starts_with(REDERIVATION_PREFIX))
+            .map(|ref_multi| {
                 (
-                    symbol.clone(),
-                    symbol
+                    ref_multi.key().clone(),
+                    ref_multi
+                        .key()
                         .strip_prefix(&REDERIVATION_PREFIX)
                         .unwrap()
                         .to_string(),
@@ -122,8 +144,8 @@ impl RelationStorage {
 
         rederivation_relations.into_iter().for_each(
             |(rederivation_symbol, actual_relation_symbol)| {
-                let rederivation_relation = self.inner.remove_entry(&rederivation_symbol).unwrap();
-                let actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
+                let rederivation_relation = self.inner.remove(&rederivation_symbol).unwrap();
+                let mut actual_relation = self.inner.get_mut(&actual_relation_symbol).unwrap();
 
                 rederivation_relation.1.into_iter().for_each(|atom| {
                     actual_relation.insert(atom);
@@ -135,11 +157,13 @@ impl RelationStorage {
         self.inner.get_mut(relation_symbol).unwrap().clear();
     }
     pub fn clear_prefix(&mut self, prefix: &str) {
-        for (symbol, relation) in self.inner.iter_mut() {
+        self.inner.iter_mut().for_each(|mut ref_mult| {
+            let (symbol, relation) = ref_mult.pair_mut();
+
             if symbol.starts_with(prefix) {
-                relation.clear();
+                relation.clear()
             }
-        }
+        });
     }
 
     pub fn insert_registered(
@@ -155,7 +179,7 @@ impl RelationStorage {
             hashes.push(hash);
         });
 
-        if let Some(relation) = self.inner.get_mut(relation_symbol) {
+        if let Some(mut relation) = self.inner.get_mut(relation_symbol) {
             relation.extend(hashes)
         } else {
             let mut fresh_fact_storage = FactStorage::default();
@@ -166,12 +190,12 @@ impl RelationStorage {
         }
     }
 
-    pub fn insert_all(&mut self, relation_symbol: &str, facts: impl Iterator<Item = Row>) {
-        if let Some(relation) = self.inner.get_mut(relation_symbol) {
-            relation.extend(facts.into_iter().map(|row| row))
+    pub fn insert_all(&self, relation_symbol: &str, facts: impl Iterator<Item = Row>) {
+        if let Some(mut relation) = self.inner.get_mut(relation_symbol) {
+            relation.extend(facts.into_iter())
         } else {
             let mut fresh_fact_storage = FactStorage::default();
-            fresh_fact_storage.extend(facts.into_iter().map(|row| row));
+            fresh_fact_storage.extend(facts.into_iter());
 
             self.inner
                 .insert(relation_symbol.to_string(), fresh_fact_storage);
@@ -181,7 +205,7 @@ impl RelationStorage {
         self.fact_registry.register(fact);
     }
     pub fn insert(&mut self, relation_symbol: &str, ground_atom: AnonymousGroundAtom) -> bool {
-        if let Some(relation) = self.inner.get_mut(relation_symbol) {
+        if let Some(mut relation) = self.inner.get_mut(relation_symbol) {
             return relation.insert(self.fact_registry.register(ground_atom));
         }
 
@@ -238,7 +262,7 @@ impl RelationStorage {
             |(idx, (delta_relation_symbol, current_delta_evaluation))| {
                 let self_mut_ref = self as *mut Self;
 
-                let curr = self.get_relation(delta_relation_symbol).unwrap();
+                let curr = self.get_relation(delta_relation_symbol);
 
                 let diff: FactStorage = current_delta_evaluation
                     .into_iter()
@@ -272,8 +296,8 @@ impl RelationStorage {
         return self
             .inner
             .iter()
-            .filter(|(symbol, _)| !symbol.starts_with(DELTA_PREFIX))
-            .map(|(_, relation)| relation.len())
+            .filter(|ref_multi| !ref_multi.key().starts_with(DELTA_PREFIX))
+            .map(|ref_multi| ref_multi.value().len())
             .sum();
     }
 

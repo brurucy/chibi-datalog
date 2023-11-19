@@ -59,8 +59,7 @@ impl<'a> RuleEvaluator<'a> {
                     if join_key.is_empty() {
                         let current_relation = self
                             .facts_storage
-                            .get_relation(id_translator.get(&unification_target.symbol).unwrap())
-                            .unwrap();
+                            .get_relation(id_translator.get(&unification_target.symbol).unwrap());
 
                         current_relation
                             .into_par_iter()
