@@ -166,24 +166,12 @@ impl RelationStorage {
         }
     }
 
-    pub fn insert_all(
-        &mut self,
-        relation_symbol: &str,
-        facts: impl Iterator<Item = AnonymousGroundAtom>,
-    ) {
+    pub fn insert_all(&mut self, relation_symbol: &str, facts: impl Iterator<Item = Row>) {
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
-            relation.extend(
-                facts
-                    .into_iter()
-                    .map(|fact| self.fact_registry.register(fact)),
-            )
+            relation.extend(facts.into_iter().map(|row| row))
         } else {
             let mut fresh_fact_storage = FactStorage::default();
-            fresh_fact_storage.extend(
-                facts
-                    .into_iter()
-                    .map(|fact| self.fact_registry.register(fact)),
-            );
+            fresh_fact_storage.extend(facts.into_iter().map(|row| row));
 
             self.inner
                 .insert(relation_symbol.to_string(), fresh_fact_storage);
@@ -240,51 +228,43 @@ impl RelationStorage {
         let evaluation = evaluation_setup
             .into_par_iter()
             .map(|(delta_relation_symbol, rule)| {
-                (delta_relation_symbol, rule.step().collect::<HashSet<_>>())
+                (delta_relation_symbol, rule.step().collect::<Vec<_>>())
             })
             .collect::<Vec<_>>();
         println!("evaluation time: {} milis", now.elapsed().as_millis());
 
-        let relations_to_clear: HashSet<_> =
-            evaluation.iter().map(|(sym, _)| sym).cloned().collect();
-        relations_to_clear.iter().for_each(|delta_relation_symbol| {
-            self.clear_relation(delta_relation_symbol);
-        });
-
         let now = Instant::now();
-        evaluation
-            .into_iter()
-            .for_each(|(delta_relation_symbol, current_delta_evaluation)| {
-                let relation_symbol = delta_relation_symbol.clone();
-                relation_symbol.strip_prefix(DELTA_PREFIX).unwrap();
-                let current_delta_relation_hashes = self.inner.get(delta_relation_symbol).unwrap();
+        evaluation.into_iter().enumerate().for_each(
+            |(idx, (delta_relation_symbol, current_delta_evaluation))| {
+                let self_mut_ref = self as *mut Self;
 
-                let diff: Vec<_> = current_delta_evaluation
+                let curr = self.get_relation(delta_relation_symbol).unwrap();
+
+                let diff: FactStorage = current_delta_evaluation
                     .into_iter()
-                    .filter(|inferred_fact| {
-                        if self.fact_registry.contains(inferred_fact) {
-                            let key = self.fact_registry.compute_key(inferred_fact);
+                    .map(|fact| unsafe {
+                        let self_ref = &mut *self_mut_ref;
 
-                            return !current_delta_relation_hashes.contains(&key);
-                        }
-
-                        true
+                        self_ref.fact_registry.register(fact)
                     })
+                    .filter(|row| !curr.contains(row))
                     .collect();
 
-                /*let diff: Vec<_> = current_delta_evaluation
-                .difference(self.get_relation(delta_relation_symbol).unwrap())
-                .cloned()
-                .collect();*/
+                // This is actually wrong.
+                if idx == 0 {
+                    (*self.inner.get_mut(delta_relation_symbol).unwrap()) = diff.clone();
+                } else {
+                    self.insert_all(delta_relation_symbol, diff.clone().into_iter());
+                }
 
-                self.insert_all(delta_relation_symbol, diff.clone().into_iter()); //diff.clone().into_iter());
-
+                let relation_symbol = delta_relation_symbol.clone();
+                relation_symbol.strip_prefix(DELTA_PREFIX).unwrap();
                 self.insert_all(
                     delta_relation_symbol.strip_prefix(DELTA_PREFIX).unwrap(),
-                    //diff.into_iter(),
                     diff.into_iter(),
                 );
-            });
+            },
+        );
         println!("post-evaluation: {} milis", now.elapsed().as_millis());
     }
 

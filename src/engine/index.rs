@@ -150,21 +150,19 @@ impl<'a> Index {
                 let ucc_index = self.inner.get(&sym).unwrap().get(&ucc).unwrap();
 
                 if let Some(hashes) = facts_by_relation.inner.get(&local_symbol) {
-                    hashes.par_iter().chunks(16384).for_each(|chunk| {
-                        chunk.into_iter().for_each(|hash| {
-                            let fact = fact_registry.get(*hash);
-                            let mut projected_row = vec![None; fact.len()];
+                    hashes.into_par_iter().for_each(|hash| {
+                        let fact = fact_registry.get(*hash);
+                        let mut projected_row = vec![None; fact.len()];
 
-                            for &column_index in &ucc {
-                                if column_index < fact.len() {
-                                    projected_row[column_index] = Some(&fact[column_index]);
-                                }
+                        for &column_index in &ucc {
+                            if column_index < fact.len() {
+                                projected_row[column_index] = Some(&fact[column_index]);
                             }
+                        }
 
-                            let mut current_masked_atoms =
-                                ucc_index.entry(hashisher(&projected_row)).or_default();
-                            current_masked_atoms.push(*hash);
-                        })
+                        let mut current_masked_atoms =
+                            ucc_index.entry(hashisher(&projected_row)).or_default();
+                        current_masked_atoms.push(*hash);
                     })
                 }
             }

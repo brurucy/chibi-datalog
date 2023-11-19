@@ -49,9 +49,9 @@ impl<'a> RuleEvaluator<'a> {
             interned_rule.body.iter().zip(join_sequence.into_iter())
         {
             let mut new_rewrites = boxcar::vec![];
-            let now = Instant::now();
             current_rewrites
                 .drain(..)
+                .par_bridge()
                 //.with_min_len(10000)
                 .map(|rewrite| (rewrite.apply(current_body_atom), rewrite))
                 .for_each(|(unification_target, rewrite)| {
@@ -63,7 +63,7 @@ impl<'a> RuleEvaluator<'a> {
                             .unwrap();
 
                         current_relation
-                            .into_iter()
+                            .into_par_iter()
                             .for_each(|current_ground_atom| {
                                 if let Some(new_rewrite) = unify(
                                     &unification_target,
@@ -85,7 +85,7 @@ impl<'a> RuleEvaluator<'a> {
 
                         let masked_atom = mask_atom(&unification_target);
                         if let Some(matches_by_mask) = matches_by_positions.get(&masked_atom) {
-                            matches_by_mask.iter().for_each(|current_ground_atom| {
+                            matches_by_mask.par_iter().for_each(|current_ground_atom| {
                                 let new_rewrite = unify(
                                     &unification_target,
                                     self.fact_registry.get(*current_ground_atom),
@@ -102,14 +102,6 @@ impl<'a> RuleEvaluator<'a> {
                 });
 
             current_rewrites = new_rewrites.into_iter().collect();
-            if join_key.is_empty() {
-                println!(
-                    "first iteration: {} milis, {:?} {:?}",
-                    now.elapsed().as_millis(),
-                    join_key,
-                    current_body_atom.symbol
-                );
-            }
         }
 
         current_rewrites

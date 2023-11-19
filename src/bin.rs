@@ -1,4 +1,4 @@
-use ascent::{ascent, ascent_par};
+use ascent::ascent;
 use chibi_datalog::engine::datalog::ChibiRuntime;
 use crepe::crepe;
 use datalog_rule_macro::program;
@@ -51,16 +51,21 @@ fn main() {
     let now = Instant::now();
     chibi_runtime.poll();
     println!("chibi: {} milis", now.elapsed().as_millis());
+    let q = build_query!(tc(_, _));
+    let answer: Vec<_> = chibi_runtime.query(&q).unwrap().into_iter().collect();
+    println!("inferred tuples: {}", answer.len());
 
     let now = Instant::now();
-    crepe_runtime.run();
+    let teecee = crepe_runtime.run();
     println!("crepe: {} milis", now.elapsed().as_millis());
+    println!("inferred tuples: {}", teecee.0.len());
 
     let now = Instant::now();
     ascnt_runtime.run();
     println!("ascent: {} milis", now.elapsed().as_millis());
-}
-*/
+    println!("inferred tuples: {}", ascnt_runtime.tc.len());
+}*/
+
 crepe! {
     @input
     struct RDF(usize, usize, usize);
