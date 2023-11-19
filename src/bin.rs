@@ -1,4 +1,4 @@
-use ascent::{ascent, ascent_par};
+use ascent::ascent;
 use chibi_datalog::engine::datalog::ChibiRuntime;
 use crepe::crepe;
 use datalog_rule_macro::program;
@@ -37,7 +37,7 @@ fn main() {
     let mut ascnt_runtime = AscentProgram::default();
     let mut crepe_runtime = Crepe::new();
 
-    let data = include_str!("../data/graph.txt");
+    let data = include_str!("../data/graph1000.txt");
     data.lines().into_iter().for_each(|line| {
         let triple: Vec<_> = line.split(" ").collect();
         let from: usize = triple[0].parse().unwrap();
@@ -50,17 +50,22 @@ fn main() {
 
     let now = Instant::now();
     chibi_runtime.poll();
-    println!("chibi: {}", now.elapsed().as_micros());
+    println!("chibi: {} milis", now.elapsed().as_millis());
+    let q = build_query!(tc(_, _));
+    let answer: Vec<_> = chibi_runtime.query(&q).unwrap().into_iter().collect();
+    println!("inferred tuples: {}", answer.len());
 
     let now = Instant::now();
-    crepe_runtime.run();
-    println!("crepe: {}", now.elapsed().as_micros());
+    let teecee = crepe_runtime.run();
+    println!("crepe: {} milis", now.elapsed().as_millis());
+    println!("inferred tuples: {}", teecee.0.len());
 
     let now = Instant::now();
     ascnt_runtime.run();
-    println!("ascent: {}", now.elapsed().as_micros());
-}*/
-
+    println!("ascent: {} milis", now.elapsed().as_millis());
+    println!("inferred tuples: {}", ascnt_runtime.tc.len());
+}
+*/
 crepe! {
     @input
     struct RDF(usize, usize, usize);
@@ -146,18 +151,18 @@ fn main() {
 
     let now = Instant::now();
     chibi_runtime.poll();
-    println!("chibi: {}", now.elapsed().as_millis());
+    println!("chibi: {} milis", now.elapsed().as_millis());
     let q = build_query!(T(_, _, _));
     let answer: Vec<_> = chibi_runtime.query(&q).unwrap().into_iter().collect();
     println!("inferred tuples: {}", answer.len());
 
     let now = Instant::now();
     let crepe_out = crepe_runtime.run();
-    println!("crepe: {}", now.elapsed().as_millis());
+    println!("crepe: {} milis", now.elapsed().as_millis());
     println!("inferred tuples: {}", crepe_out.0.len());
 
     let now = Instant::now();
     ascnt_runtime.run();
-    println!("ascent: {}", now.elapsed().as_millis());
+    println!("ascent: {} milis", now.elapsed().as_millis());
     println!("inferred tuples: {}", ascnt_runtime.T.len());
 }

@@ -30,17 +30,16 @@ impl ChibiRuntime {
         self.unprocessed_insertions.insert(relation, ground_atom)
     }
     pub fn remove(&mut self, query: &Query) {
-        self.processed
-            .inner
-            .get(query.symbol)
-            .unwrap()
+        let deletion_targets: Vec<_> = self
+            .processed
+            .get_relation(query.symbol)
             .iter()
-            .for_each(|fact| {
-                if pattern_match(query, fact) {
-                    self.unprocessed_deletions
-                        .insert(query.symbol, fact.clone());
-                }
-            })
+            .map(|hash| (*hash, self.processed.fact_registry.get(*hash).clone()))
+            .filter(|(hash, fact)| pattern_match(query, fact))
+            .collect();
+
+        self.unprocessed_deletions
+            .insert_registered(query.symbol, deletion_targets.into_iter());
     }
     pub fn contains(
         &self,
@@ -60,30 +59,28 @@ impl ChibiRuntime {
     pub fn query<'a>(
         &'a self,
         query: &'a Query,
-    ) -> Result<impl Iterator<Item = &AnonymousGroundAtom>, String> {
+    ) -> Result<impl Iterator<Item = &AnonymousGroundAtom> + 'a, String> {
         if !self.safe() {
             return Err("poll needed to obtain correct results".to_string());
         }
-
-        Ok(self
+        return Ok(self
             .processed
-            .inner
-            .get(query.symbol)
-            .unwrap()
+            .get_relation(query.symbol)
             .iter()
-            .filter(|fact| pattern_match(query, fact)))
+            .map(|fact| self.processed.fact_registry.get(*fact))
+            .filter(|fact| pattern_match(query, fact)));
     }
     pub fn poll(&mut self) {
-        let global_uccs = &self.program_index.unique_program_column_combinations;
-
         if !self.unprocessed_deletions.is_empty() {
             self.unprocessed_deletions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
                     let mut overdeletion_symbol = relation_symbol.clone();
                     add_prefix(&mut overdeletion_symbol, OVERDELETION_PREFIX);
 
-                    self.processed
-                        .insert_all(&overdeletion_symbol, unprocessed_facts.into_iter());
+                    self.processed.insert_all(
+                        &overdeletion_symbol,
+                        unprocessed_facts.into_iter().map(|(hash, _)| hash),
+                    );
                 },
             );
 
@@ -95,7 +92,6 @@ impl ChibiRuntime {
                 &self.recursive_delta_overdeletion_program,
                 nonrecursive_delta_overdeletion_join_orders,
                 recursive_delta_overdeletion_join_orders,
-                global_uccs,
             );
             self.processed.drain_deltas();
             self.processed.overdelete();
@@ -109,7 +105,6 @@ impl ChibiRuntime {
                 &self.recursive_delta_rederivation_program,
                 nonrecursive_delta_rederivation_join_orders,
                 recursive_delta_rederivation_join_orders,
-                global_uccs,
             );
             self.processed.drain_deltas();
             self.processed.rederive();
@@ -122,15 +117,13 @@ impl ChibiRuntime {
             self.unprocessed_insertions.drain_all_relations().for_each(
                 |(relation_symbol, unprocessed_facts)| {
                     // We dump all unprocessed EDB relations into delta EDB relations
-                    self.processed
-                        // This clone hurts.
-                        .insert_all(
-                            &format!("{}{}", DELTA_PREFIX, relation_symbol),
-                            unprocessed_facts.clone().into_iter(),
-                        );
+                    self.processed.insert_registered(
+                        &format!("{}{}", DELTA_PREFIX, relation_symbol),
+                        unprocessed_facts.clone().into_iter(),
+                    );
                     // And in their respective place
                     self.processed
-                        .insert_all(relation_symbol, unprocessed_facts.into_iter());
+                        .insert_registered(&relation_symbol, unprocessed_facts.into_iter());
                 },
             );
 
@@ -142,7 +135,6 @@ impl ChibiRuntime {
                 &self.recursive_delta_program,
                 nonrecursive_delta_join_orders,
                 recursive_delta_join_orders,
-                global_uccs,
             );
 
             self.processed.drain_deltas()
@@ -289,10 +281,10 @@ mod tests {
         runtime.poll();
 
         // This query reads as: "Get all in tc with any values in any positions"
-        let all = build_query!(tc(_, _, _));
+        let all = build_query!(tc(_, _));
         // And this one as: "Get all in tc with the first term being a"
         // There also is a QueryBuilder, if you do not want to use a macro.
-        let all_from_a = build_query!(tc("a", _, _));
+        let all_from_a = build_query!(tc("a", _));
 
         let actual_all: HashSet<&AnonymousGroundAtom> = runtime.query(&all).unwrap().collect();
         let expected_all: HashSet<AnonymousGroundAtom> = vec![
