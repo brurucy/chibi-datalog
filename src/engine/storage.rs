@@ -274,7 +274,7 @@ impl RelationStorage {
                     .filter(|row| !curr.contains(row))
                     .collect();
 
-                // This is actually wrong.
+                // This is actually wrong :) it will blow up at some point....
                 if idx == 0 {
                     (*self.inner.get_mut(delta_relation_symbol).unwrap()) = diff.clone();
                 } else {
