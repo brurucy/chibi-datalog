@@ -64,8 +64,8 @@ fn main() {
     ascnt_runtime.run();
     println!("ascent: {} milis", now.elapsed().as_millis());
     println!("inferred tuples: {}", ascnt_runtime.tc.len());
-}*/
-
+}
+*/
 crepe! {
     @input
     struct RDF(usize, usize, usize);

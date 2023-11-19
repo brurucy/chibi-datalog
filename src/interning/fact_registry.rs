@@ -21,6 +21,7 @@ pub struct FactRegistry {
 }
 
 impl FactRegistry {
+    // I know this is a terrible idea. This is not permanent.
     pub fn register(&mut self, fact: AnonymousGroundAtom) -> Row {
         let hash = hashisher(&fact);
 
