@@ -47,13 +47,6 @@ impl<'a> RuleEvaluator<'a> {
         for (current_body_atom, join_key) in
             interned_rule.body.iter().zip(join_sequence.into_iter())
         {
-            let matches_by_symbol = self
-                .index
-                .inner
-                .get(id_translator.get(&current_body_atom.symbol).unwrap())
-                .unwrap();
-            let matches_by_positions = matches_by_symbol.get(join_key).unwrap();
-
             let mut new_rewrites = vec![];
             let now = Instant::now();
             current_rewrites
@@ -75,11 +68,17 @@ impl<'a> RuleEvaluator<'a> {
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
-                                //new_rewrites.push(local_rewrite);
                                 new_rewrites.push(local_rewrite);
                             };
                         });
                     } else {
+                        let matches_by_symbol = self
+                            .index
+                            .inner
+                            .get(id_translator.get(&current_body_atom.symbol).unwrap())
+                            .unwrap();
+                        let matches_by_positions = matches_by_symbol.get(join_key).unwrap();
+
                         let masked_atom = mask_atom(&unification_target);
                         if let Some(matches_by_mask) = matches_by_positions.get(&masked_atom) {
                             matches_by_mask.iter().for_each(|current_ground_atom| {
@@ -92,7 +91,6 @@ impl<'a> RuleEvaluator<'a> {
                                 let mut local_rewrite = rewrite.clone();
                                 local_rewrite.extend(new_rewrite);
 
-                                //new_rewrites.push(local_rewrite);
                                 new_rewrites.push(local_rewrite);
                             });
                         }

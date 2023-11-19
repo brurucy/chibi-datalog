@@ -1,32 +1,59 @@
-use crate::engine::program_index::RuleJoinOrders;
+use crate::engine::index::Index;
 use crate::engine::program_index::UniqueColumnCombinations;
+use crate::engine::program_index::{ProgramIndex, RuleJoinOrders};
 use crate::engine::storage::RelationStorage;
+use crate::interning::fact_registry::FactRegistry;
+use ascent::internal::Instant;
 use datalog_syntax::Program;
 
 pub fn semi_naive_evaluation(
-    fact_storage: &mut RelationStorage,
+    relation_storage: &mut RelationStorage,
     nonrecursive_delta_program: &Program,
     recursive_delta_program: &Program,
     nonrecursive_join_order: &RuleJoinOrders,
     recursive_join_order: &RuleJoinOrders,
-    global_uccs: &UniqueColumnCombinations,
 ) {
-    fact_storage.materialize_delta_program(
+    let nonrecursive_program_index = ProgramIndex::from(vec![nonrecursive_delta_program]);
+    let recursive_program_index = ProgramIndex::from(vec![recursive_delta_program]);
+
+    let now = Instant::now();
+    let mut index = Index::new(
+        &relation_storage,
+        &nonrecursive_program_index.unique_program_column_combinations,
+        &relation_storage.fact_registry,
+    );
+    println!("Index setup: {} milis", now.elapsed().as_millis());
+    relation_storage.materialize_delta_program(
         &nonrecursive_delta_program,
         nonrecursive_join_order,
-        &global_uccs,
+        &index,
     );
+    let now = Instant::now();
+    index.update(
+        &recursive_program_index.unique_program_column_combinations,
+        &relation_storage,
+        &relation_storage.fact_registry,
+    );
+    println!("Update 1: {} milis", now.elapsed().as_millis());
 
     loop {
-        let previous_non_delta_fact_count = fact_storage.len();
+        let previous_non_delta_fact_count = relation_storage.len();
 
-        fact_storage.materialize_delta_program(
+        relation_storage.materialize_delta_program(
             &recursive_delta_program,
             recursive_join_order,
-            &global_uccs,
+            &index,
         );
 
-        let current_non_delta_fact_count = fact_storage.len();
+        let now = Instant::now();
+        index.update(
+            &recursive_program_index.unique_program_column_combinations,
+            &relation_storage,
+            &relation_storage.fact_registry,
+        );
+        println!("Update n: {} milis", now.elapsed().as_millis());
+
+        let current_non_delta_fact_count = relation_storage.len();
 
         let new_fact_count = current_non_delta_fact_count - previous_non_delta_fact_count;
 

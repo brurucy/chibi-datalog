@@ -1,21 +1,23 @@
 use crate::engine::program_index::UniqueColumnCombinations;
 use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
+use crate::helpers::helpers::{add_prefix, DELTA_PREFIX};
 use crate::interning::fact_registry::{FactRegistry, Row};
 use ahash::{AHasher, HashMap, HashMapExt, HashSet};
+use ascent::internal::Instant;
 use rayon::prelude::*;
 use std::hash::{Hash, Hasher};
 
-fn hashisher<K: Hash>(key: &Vec<K>) -> usize {
+fn hashisher<K: Hash>(key: &Vec<K>) -> Row {
     let mut hasher = AHasher::default();
 
     key.iter()
         .for_each(|masked_value| masked_value.hash(&mut hasher));
 
-    hasher.finish() as usize
+    Row(hasher.finish())
 }
 
-pub fn mask_atom(atom: &InternedAtom) -> usize {
+pub fn mask_atom(atom: &InternedAtom) -> Row {
     let mut hasher = AHasher::default();
 
     atom.terms
@@ -26,10 +28,12 @@ pub fn mask_atom(atom: &InternedAtom) -> usize {
         })
         .for_each(|masked_value| masked_value.hash(&mut hasher));
 
-    hasher.finish() as usize
+    Row(hasher.finish())
 }
 
-pub type IndexedRepresentation = HashMap<String, HashMap<Vec<usize>, HashMap<usize, HashSet<Row>>>>;
+pub type MaskedRowToRows = HashMap<Row, Vec<Row>>;
+
+pub type IndexedRepresentation = HashMap<String, HashMap<Vec<usize>, MaskedRowToRows>>;
 
 fn index(
     unique_column_combinations: &UniqueColumnCombinations,
@@ -38,16 +42,15 @@ fn index(
 ) -> IndexedRepresentation {
     let mut results: IndexedRepresentation = HashMap::new();
 
-    let flattened_uccs: Vec<(String, Vec<usize>, HashMap<usize, HashSet<Row>>)> =
-        unique_column_combinations
-            .iter()
-            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
-                curr_uccs.into_iter().for_each(|ucc| {
-                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
-                });
-
-                acc
+    let flattened_uccs: Vec<(String, Vec<usize>, MaskedRowToRows)> = unique_column_combinations
+        .iter()
+        .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+            curr_uccs.into_iter().for_each(|ucc| {
+                acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
             });
+
+            acc
+        });
 
     let index: Vec<_> = flattened_uccs
         .into_par_iter()
@@ -58,7 +61,6 @@ fn index(
                         let fact = fact_registry.get(*hash);
                         let mut projected_row = vec![None; fact.len()];
 
-                        // Perform the projection using the unique columns.
                         for &column_index in &ucc {
                             if column_index < fact.len() {
                                 projected_row[column_index] = Some(&fact[column_index]);
@@ -67,7 +69,7 @@ fn index(
 
                         let current_masked_atoms =
                             ucc_index.entry(hashisher(&projected_row)).or_default();
-                        current_masked_atoms.insert(*hash);
+                        current_masked_atoms.push(*hash);
                     }
                 }
             }
@@ -86,25 +88,6 @@ fn index(
     results
 }
 
-fn update(
-    unique_column_combinations: &UniqueColumnCombinations,
-    facts_by_relation: &RelationStorage,
-    fact_registry: &FactRegistry,
-) {
-    let mut results: IndexedRepresentation = HashMap::new();
-
-    let flattened_uccs: Vec<(String, Vec<usize>, HashMap<usize, HashSet<Row>>)> =
-        unique_column_combinations
-            .iter()
-            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
-                curr_uccs.into_iter().for_each(|ucc| {
-                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
-                });
-
-                acc
-            });
-}
-
 pub struct Index {
     pub inner: IndexedRepresentation,
 }
@@ -118,6 +101,86 @@ impl<'a> Index {
         let inner = index(&uccs, relation_storage, fact_registry);
 
         return Self { inner };
+    }
+    pub(crate) fn update(
+        &mut self,
+        unique_column_combinations: &UniqueColumnCombinations,
+        facts_by_relation: &RelationStorage,
+        fact_registry: &FactRegistry,
+    ) {
+        // Clearing all deltas
+        unique_column_combinations
+            .iter()
+            .for_each(|(symbol, uccs)| {
+                if symbol.starts_with(DELTA_PREFIX) {
+                    let current_relation_entry = self.inner.entry(symbol.clone()).or_default();
+
+                    uccs.iter().for_each(|delta_ucc| {
+                        current_relation_entry.remove(delta_ucc);
+                    })
+                }
+            });
+
+        let flattened_uccs: Vec<(String, Vec<usize>, MaskedRowToRows)> = unique_column_combinations
+            .iter()
+            .fold(vec![], |mut acc, (curr_sym, curr_uccs)| {
+                curr_uccs.into_iter().for_each(|ucc| {
+                    acc.push((curr_sym.clone(), ucc.clone(), HashMap::default()));
+                });
+
+                acc
+            });
+
+        let now = Instant::now();
+        let index: Vec<_> = flattened_uccs
+            .into_par_iter()
+            .map(|(sym, ucc, mut ucc_index)| {
+                let mut local_symbol = sym.clone();
+                if !sym.starts_with(DELTA_PREFIX) {
+                    add_prefix(&mut local_symbol, DELTA_PREFIX);
+                };
+
+                if !ucc.is_empty() {
+                    if let Some(hashes) = facts_by_relation.inner.get(&local_symbol) {
+                        for hash in hashes {
+                            let fact = fact_registry.get(*hash);
+                            let mut projected_row = vec![None; fact.len()];
+
+                            for &column_index in &ucc {
+                                if column_index < fact.len() {
+                                    projected_row[column_index] = Some(&fact[column_index]);
+                                }
+                            }
+
+                            let current_masked_atoms =
+                                ucc_index.entry(hashisher(&projected_row)).or_default();
+                            current_masked_atoms.push(*hash);
+                        }
+                    }
+                }
+
+                (sym, ucc, ucc_index)
+            })
+            .collect();
+        println!("Update computation: {} milis", now.elapsed().as_millis());
+
+        let now = Instant::now();
+        index.into_iter().for_each(|(sym, ucc, ucc_index)| {
+            let is_delta = sym.starts_with(DELTA_PREFIX);
+            let sym_uccs = self.inner.entry(sym).or_default();
+            let ucc_projections = sym_uccs.entry(ucc).or_default();
+            if is_delta {
+                *ucc_projections = ucc_index;
+            } else {
+                ucc_index.into_iter().for_each(|(masked_row, row_set)| {
+                    ucc_projections
+                        .entry(masked_row)
+                        .or_default()
+                        .extend(row_set);
+                })
+            }
+        });
+        println!("Update insertion: {} milis", now.elapsed().as_millis());
     }
 }
 

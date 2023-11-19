@@ -4,7 +4,7 @@ use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
-pub struct Row(u64);
+pub struct Row(pub u64);
 
 fn hashisher(key: &AnonymousGroundAtom) -> Row {
     let mut hasher = AHasher::default();

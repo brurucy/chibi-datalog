@@ -214,18 +214,8 @@ impl RelationStorage {
         &mut self,
         program: &Program,
         rule_join_orders: &RuleJoinOrders,
-        global_uccs: &UniqueColumnCombinations,
+        index: &Index,
     ) {
-        let now = Instant::now();
-
-        let program_local_uccs = ProgramIndex::from(vec![program]);
-        let index = Index::new(
-            &self,
-            &program_local_uccs.unique_program_column_combinations,
-            &self.fact_registry,
-        );
-        println!("indexing time: {} milis", now.elapsed().as_millis());
-
         let evaluation_setup: Vec<_> = program
             .inner
             .iter()
@@ -292,7 +282,7 @@ impl RelationStorage {
                     diff.into_iter(),
                 );
             });
-        println!("post-evaluation: {}", now.elapsed().as_millis());
+        println!("post-evaluation: {} milis", now.elapsed().as_millis());
     }
 
     pub fn len(&self) -> usize {

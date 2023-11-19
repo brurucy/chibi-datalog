@@ -146,7 +146,6 @@ impl ChibiRuntime {
                 &self.recursive_delta_program,
                 nonrecursive_delta_join_orders,
                 recursive_delta_join_orders,
-                global_uccs,
             );
 
             self.processed.drain_deltas()
