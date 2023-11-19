@@ -3,8 +3,7 @@ use crate::engine::rewrite::{InternedAtom, InternedTerm};
 use crate::engine::storage::RelationStorage;
 use crate::helpers::helpers::{add_prefix, DELTA_PREFIX};
 use crate::interning::fact_registry::{FactRegistry, Row};
-use ahash::{AHasher, HashMap, HashMapExt, HashSet};
-use ascent::internal::Instant;
+use ahash::{AHasher, HashMap, HashMapExt};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::hash::{Hash, Hasher};
@@ -142,7 +141,6 @@ impl<'a> Index {
                     acc
                 });
 
-        let now = Instant::now();
         flattened_uccs.into_par_iter().for_each(|(sym, ucc)| {
             let mut local_symbol = sym.clone();
             if !local_symbol.starts_with(DELTA_PREFIX) {
@@ -152,24 +150,25 @@ impl<'a> Index {
                 let ucc_index = self.inner.get(&sym).unwrap().get(&ucc).unwrap();
 
                 if let Some(hashes) = facts_by_relation.inner.get(&local_symbol) {
-                    hashes.into_par_iter().for_each(|hash| {
-                        let fact = fact_registry.get(*hash);
-                        let mut projected_row = vec![None; fact.len()];
+                    hashes.par_iter().chunks(16384).for_each(|chunk| {
+                        chunk.into_iter().for_each(|hash| {
+                            let fact = fact_registry.get(*hash);
+                            let mut projected_row = vec![None; fact.len()];
 
-                        for &column_index in &ucc {
-                            if column_index < fact.len() {
-                                projected_row[column_index] = Some(&fact[column_index]);
+                            for &column_index in &ucc {
+                                if column_index < fact.len() {
+                                    projected_row[column_index] = Some(&fact[column_index]);
+                                }
                             }
-                        }
 
-                        let mut current_masked_atoms =
-                            ucc_index.entry(hashisher(&projected_row)).or_default();
-                        current_masked_atoms.push(*hash);
+                            let mut current_masked_atoms =
+                                ucc_index.entry(hashisher(&projected_row)).or_default();
+                            current_masked_atoms.push(*hash);
+                        })
                     })
                 }
             }
         });
-        println!("Update computation: {} milis", now.elapsed().as_millis());
     }
 }
 

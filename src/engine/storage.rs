@@ -3,12 +3,13 @@ use crate::engine::program_index::{ProgramIndex, RuleJoinOrders, UniqueColumnCom
 use crate::evaluation::rule::RuleEvaluator;
 use crate::helpers::helpers::{DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX};
 use crate::interning::fact_registry::{FactRegistry, Row};
-use ahash::{HashMap, HashSet, HashSetExt};
+use ahash::{HashMap, HashSet};
 use datalog_syntax::{AnonymousGroundAtom, Program};
+use indexmap::IndexSet;
 use rayon::prelude::*;
 use std::time::Instant;
 
-pub type FactStorage = HashSet<Row>;
+pub type FactStorage = IndexSet<Row, ahash::RandomState>;
 #[derive(Default)]
 pub struct RelationStorage {
     pub(crate) inner: HashMap<String, FactStorage>,
@@ -20,7 +21,7 @@ impl RelationStorage {
         return self.inner.get(relation_symbol);
     }
     pub fn drain_relation(&mut self, relation_symbol: &str) -> impl Iterator<Item = Row> + '_ {
-        self.inner.get_mut(relation_symbol).unwrap().drain()
+        self.inner.get_mut(relation_symbol).unwrap().drain(..)
     }
     pub fn drain_all_relations(
         &mut self,
@@ -29,7 +30,7 @@ impl RelationStorage {
             (
                 relation_symbol,
                 facts
-                    .drain()
+                    .drain(..)
                     .map(|hash| (hash, self.fact_registry.remove(hash)))
                     .collect::<Vec<_>>(),
             )
@@ -43,7 +44,9 @@ impl RelationStorage {
             .inner
             .iter_mut()
             .filter(move |(relation_symbol, _)| relation_symbol.contains(prefix))
-            .map(|(relation_symbol, facts)| (relation_symbol, facts.drain().collect::<Vec<_>>()));
+            .map(|(relation_symbol, facts)| {
+                (relation_symbol, facts.drain(..).collect::<Vec<_>>())
+            });
     }
     pub fn drain_deltas(&mut self) {
         let delta_relation_symbols: Vec<_> = self
@@ -155,7 +158,7 @@ impl RelationStorage {
         if let Some(relation) = self.inner.get_mut(relation_symbol) {
             relation.extend(hashes)
         } else {
-            let mut fresh_fact_storage = FactStorage::new();
+            let mut fresh_fact_storage = FactStorage::default();
             fresh_fact_storage.extend(hashes);
 
             self.inner
@@ -175,7 +178,7 @@ impl RelationStorage {
                     .map(|fact| self.fact_registry.register(fact)),
             )
         } else {
-            let mut fresh_fact_storage = FactStorage::new();
+            let mut fresh_fact_storage = FactStorage::default();
             fresh_fact_storage.extend(
                 facts
                     .into_iter()
@@ -194,7 +197,7 @@ impl RelationStorage {
             return relation.insert(self.fact_registry.register(ground_atom));
         }
 
-        let mut fresh_fact_storage = FactStorage::new();
+        let mut fresh_fact_storage = FactStorage::default();
         fresh_fact_storage.insert(self.fact_registry.register(ground_atom));
 
         self.inner
