@@ -1,19 +1,25 @@
 use ahash::{HashMap, HashSet};
 use datalog_syntax::{AnonymousGroundAtom, Atom, Rule, Term, TypedValue};
+use lasso::{Interner, Key, Rodeo};
+use rkyv::{Archive, Deserialize, Serialize};
+use size_of::SizeOf;
+use std::fmt::{Debug, Formatter};
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
+#[derive(
+    Ord, PartialOrd, Eq, PartialEq, Clone, Hash, Debug, Archive, Serialize, Deserialize, SizeOf,
+)]
 pub enum InternedTerm {
     Variable(usize),
     Constant(TypedValue),
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash, Archive, Serialize, Deserialize, SizeOf)]
 pub struct InternedAtom {
     pub terms: Vec<InternedTerm>,
     pub symbol: usize,
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash, Archive, Serialize, Deserialize, SizeOf)]
 pub struct InternedRule {
     pub head: InternedAtom,
     pub body: Vec<InternedAtom>,
@@ -36,6 +42,36 @@ pub fn intern_atom<'a>(atom: Atom, relation_to_id: &HashMap<String, usize>) -> I
         symbol: *interned_symbol,
         terms: interned_terms,
     };
+}
+
+pub fn reliably_intern_atom(atom: &Atom, interner: &mut Rodeo) -> InternedAtom {
+    let head_symbol = interner.get_or_intern(atom.symbol.clone());
+    let terms = atom
+        .terms
+        .iter()
+        .map(|term| match term {
+            Term::Variable(name) => {
+                InternedTerm::Variable(interner.get_or_intern(name).into_usize())
+            }
+            Term::Constant(inner) => InternedTerm::Constant(inner.clone()),
+        })
+        .collect();
+
+    return InternedAtom {
+        terms: terms,
+        symbol: head_symbol.into_usize(),
+    };
+}
+
+pub fn reliably_intern_rule(rule: Rule, interner: &mut Rodeo) -> InternedRule {
+    InternedRule {
+        head: reliably_intern_atom(&rule.head, interner),
+        body: rule
+            .body
+            .iter()
+            .map(|atom| reliably_intern_atom(atom, interner))
+            .collect(),
+    }
 }
 
 pub fn intern_rule(rule: Rule) -> (InternedRule, HashMap<usize, String>) {
@@ -78,7 +114,20 @@ pub fn intern_rule(rule: Rule) -> (InternedRule, HashMap<usize, String>) {
 pub type Domain = usize;
 pub type Substitution = (Domain, TypedValue);
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Eq,
+    Ord,
+    Hash,
+    Default,
+    Archive,
+    Serialize,
+    Deserialize,
+    SizeOf,
+)]
 pub struct Rewrite {
     pub inner: Vec<Substitution>,
 }
@@ -109,32 +158,27 @@ impl Rewrite {
             self.insert(sub);
         })
     }
-    pub fn apply(&self, atom: &InternedAtom) -> InternedAtom {
-        return InternedAtom {
-            terms: atom
-                .terms
-                .iter()
-                .map(|term| {
-                    if let InternedTerm::Variable(identifier) = term {
-                        if let Some(constant) = self.get(*identifier) {
-                            return InternedTerm::Constant(constant.clone());
-                        }
+    pub fn apply(&self, atom: Vec<InternedTerm>) -> Vec<InternedTerm> {
+        return atom
+            .iter()
+            .map(|term| {
+                if let InternedTerm::Variable(identifier) = term {
+                    if let Some(constant) = self.get(*identifier) {
+                        return InternedTerm::Constant(constant.clone());
                     }
+                }
 
-                    term.clone()
-                })
-                .collect(),
-            symbol: atom.symbol,
-        };
+                term.clone()
+            })
+            .collect();
     }
     pub fn remove(&mut self, key: Domain) -> TypedValue {
         let position = self.inner.iter().position(|value| value.0 == key).unwrap();
 
         return self.inner.swap_remove(position).1;
     }
-    pub fn ground(mut self, atom: &InternedAtom) -> AnonymousGroundAtom {
-        atom.terms
-            .iter()
+    pub fn ground(mut self, atom: Vec<InternedTerm>) -> AnonymousGroundAtom {
+        atom.iter()
             .map(|term| {
                 return match term {
                     InternedTerm::Variable(inner) => self.remove(*inner),
@@ -145,15 +189,15 @@ impl Rewrite {
     }
 }
 
-pub fn unify(left: &InternedAtom, right: &AnonymousGroundAtom) -> Option<Rewrite> {
+pub fn unify(left: &Vec<InternedTerm>, right: &AnonymousGroundAtom) -> Option<Rewrite> {
     // If atoms don't have the same term length, they can't be unified
-    if left.terms.len() != right.len() {
+    if left.len() != right.len() {
         return None;
     }
 
     let mut rewrite: Rewrite = Default::default();
 
-    for (left_term, right_term) in left.terms.iter().zip(right.iter()) {
+    for (left_term, right_term) in left.iter().zip(right.iter()) {
         match left_term {
             // If both terms are constants and they don't match, unification fails
             InternedTerm::Constant(l_const) if l_const != right_term => return None,

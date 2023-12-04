@@ -7,7 +7,6 @@ use dashmap::{DashMap, Map};
 use datalog_syntax::{AnonymousGroundAtom, Program};
 use indexmap::IndexSet;
 use rayon::prelude::*;
-use std::time::Instant;
 
 pub type FactStorage = IndexSet<Row, ahash::RandomState>;
 #[derive(Default)]
@@ -216,6 +215,15 @@ impl RelationStorage {
             .insert(relation_symbol.to_string(), fresh_fact_storage);
 
         true
+    }
+    pub fn remove(&mut self, relation_symbol: &str, ground_atom: AnonymousGroundAtom) -> bool {
+        if let Some(mut relation) = self.inner.get_mut(relation_symbol) {
+            let registration = &self.fact_registry.register(ground_atom);
+
+            return relation.remove(registration);
+        }
+
+        false
     }
     pub fn contains(&self, relation_symbol: &str, ground_atom: &AnonymousGroundAtom) -> bool {
         if let Some(relation) = self.inner.get(relation_symbol) {

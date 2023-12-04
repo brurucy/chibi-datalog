@@ -1,4 +1,4 @@
-use ascent::ascent;
+use ascent::{ascent, ascent_par};
 use chibi_datalog::engine::datalog::ChibiRuntime;
 use crepe::crepe;
 use datalog_rule_macro::program;

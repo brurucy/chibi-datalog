@@ -3,7 +3,7 @@ use datalog_syntax::AnonymousGroundAtom;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Row(pub u64);
 
 fn hashisher(key: &AnonymousGroundAtom) -> Row {

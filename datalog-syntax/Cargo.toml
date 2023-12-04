@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 ordered-float = "3.0.0"
+rkyv = { version = "0.7.42", features = ["validation"] }
+size-of = "0.1.5"

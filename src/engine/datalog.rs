@@ -1,45 +1,102 @@
-use crate::engine::program_index::ProgramIndex;
+use crate::engine::rewrite::{reliably_intern_rule, unify, InternedTerm, Rewrite};
 use crate::engine::storage::RelationStorage;
 use crate::evaluation::query::pattern_match;
-use crate::evaluation::semi_naive::semi_naive_evaluation;
-use crate::helpers::helpers::{
-    add_prefix, split_program, DELTA_PREFIX, OVERDELETION_PREFIX, REDERIVATION_PREFIX,
-};
-use crate::program_transformations::delta_program::make_delta_program;
-use crate::program_transformations::dred::{make_overdeletion_program, make_rederivation_program};
 use datalog_syntax::*;
+use dbsp::operator::FilterMap;
+use dbsp::profile::Profiler;
+use dbsp::{
+    CollectionHandle, DBSPHandle, IndexedZSet, OrdIndexedZSet, OutputHandle, Runtime, Stream,
+};
+use lasso::{Key, Rodeo, Spur};
 use std::collections::HashSet;
+use std::fmt;
+use std::time::Instant;
 
-// Hairy
+pub type FlattenedInternedFact = (usize, Vec<TypedValue>);
+pub type FlattenedInternedAtom = (usize, Vec<InternedTerm>);
+pub type FlattenedInternedRule = (usize, FlattenedInternedAtom, Vec<FlattenedInternedAtom>);
+
+pub type Weight = isize;
 pub struct ChibiRuntime {
-    processed: RelationStorage,
-    unprocessed_insertions: RelationStorage,
-    unprocessed_deletions: RelationStorage,
-    program: Program,
-    nonrecursive_delta_program: Program,
-    recursive_delta_program: Program,
-    nonrecursive_delta_overdeletion_program: Program,
-    recursive_delta_overdeletion_program: Program,
-    nonrecursive_delta_rederivation_program: Program,
-    recursive_delta_rederivation_program: Program,
-    program_index: ProgramIndex,
+    interner: Rodeo,
+    dbsp_runtime: DBSPHandle,
+    fact_sink: CollectionHandle<FlattenedInternedFact, Weight>,
+    rule_sink: CollectionHandle<FlattenedInternedRule, Weight>,
+    fact_source: OutputHandle<OrdIndexedZSet<usize, Vec<TypedValue>, Weight>>,
+    materialisation: RelationStorage,
+    safe: bool,
+}
+
+struct SliceDisplay<'a, T: 'a>(&'a [T]);
+
+impl<'a, T: fmt::Debug + 'a> fmt::Debug for SliceDisplay<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut first = true;
+        for item in self.0 {
+            if !first {
+                write!(f, ", {:?}", item)?;
+            } else {
+                write!(f, "{:?}", item)?;
+            }
+            first = false;
+        }
+        Ok(())
+    }
+}
+
+fn is_ground(atom: &Vec<InternedTerm>) -> bool {
+    return !atom.iter().any(|term| match term {
+        InternedTerm::Variable(_) => true,
+        InternedTerm::Constant(_) => false,
+    });
 }
 
 impl ChibiRuntime {
     pub fn insert(&mut self, relation: &str, ground_atom: AnonymousGroundAtom) -> bool {
-        self.unprocessed_insertions.insert(relation, ground_atom)
+        let interned_symbol = self.interner.get_or_intern(relation);
+
+        self.fact_sink
+            .push((interned_symbol.into_usize(), ground_atom.clone()), 1);
+
+        self.safe = false;
+
+        self.materialisation.insert(relation, ground_atom)
     }
-    pub fn remove(&mut self, query: &Query) {
-        let deletion_targets: Vec<_> = self
-            .processed
-            .get_relation(query.symbol)
+    pub fn remove(&mut self, query: &Query) -> impl Iterator<Item = AnonymousGroundAtom> {
+        let mut removals = vec![];
+        let query_symbol = query.symbol;
+        let interned_symbol = self.interner.get(query_symbol).unwrap();
+
+        let removal_targets: Vec<_> = self
+            .materialisation
+            .get_relation(query_symbol)
             .iter()
-            .map(|hash| (*hash, self.processed.fact_registry.get(*hash).clone()))
-            .filter(|(hash, fact)| pattern_match(query, fact))
+            .filter(|row| pattern_match(query, self.materialisation.fact_registry.get(**row)))
+            .cloned()
             .collect();
 
-        self.unprocessed_deletions
-            .insert_registered(query.symbol, deletion_targets.into_iter());
+        removal_targets.iter().for_each(|&candidate| {
+            self.fact_sink.push(
+                (
+                    interned_symbol.into_usize(),
+                    self.materialisation.fact_registry.get(candidate).clone(),
+                ),
+                -1,
+            );
+        });
+
+        self.safe = false;
+
+        let mut relation = self.materialisation.inner.get_mut(query_symbol).unwrap();
+        removal_targets.iter().for_each(|candidate| {
+            relation.remove(candidate);
+        });
+
+        removal_targets.into_iter().for_each(|candidate| {
+            removals.push(self.materialisation.fact_registry.remove(candidate))
+        });
+
+        removals.into_iter()
     }
     pub fn contains(
         &self,
@@ -50,11 +107,7 @@ impl ChibiRuntime {
             return Err("poll needed to obtain correct results".to_string());
         }
 
-        if !self.processed.contains(relation, ground_atom) {
-            return Ok(self.unprocessed_insertions.contains(relation, ground_atom));
-        }
-
-        Ok(true)
+        Ok(self.materialisation.contains(relation, ground_atom))
     }
     pub fn query<'a>(
         &'a self,
@@ -64,192 +117,168 @@ impl ChibiRuntime {
             return Err("poll needed to obtain correct results".to_string());
         }
         return Ok(self
-            .processed
+            .materialisation
             .get_relation(query.symbol)
             .iter()
-            .map(|fact| self.processed.fact_registry.get(*fact))
+            .map(|fact| self.materialisation.fact_registry.get(*fact))
             .filter(|fact| pattern_match(query, fact)));
     }
     pub fn poll(&mut self) {
-        if !self.unprocessed_deletions.is_empty() {
-            self.unprocessed_deletions.drain_all_relations().for_each(
-                |(relation_symbol, unprocessed_facts)| {
-                    let mut overdeletion_symbol = relation_symbol.clone();
-                    add_prefix(&mut overdeletion_symbol, OVERDELETION_PREFIX);
+        let now = Instant::now();
+        self.dbsp_runtime.step().unwrap();
+        println!("{}", now.elapsed().as_millis());
 
-                    self.processed.insert_all(
-                        &overdeletion_symbol,
-                        unprocessed_facts.into_iter().map(|(hash, _)| hash),
-                    );
-                },
-            );
+        let consolidated = self.fact_source.consolidate();
+        consolidated
+            .iter()
+            .for_each(|(relation_identifier, fresh_fact, weight)| {
+                let spur = Spur::try_from_usize(relation_identifier).unwrap();
+                let sym = self.interner.resolve(&spur);
+                //println!("{} - {}({:?})", weight, sym, SliceDisplay(&fresh_fact));
 
-            let nonrecursive_delta_overdeletion_join_orders = self.program_index.get_join_orders(2);
-            let recursive_delta_overdeletion_join_orders = self.program_index.get_join_orders(3);
-            semi_naive_evaluation(
-                &mut self.processed,
-                &self.nonrecursive_delta_overdeletion_program,
-                &self.recursive_delta_overdeletion_program,
-                nonrecursive_delta_overdeletion_join_orders,
-                recursive_delta_overdeletion_join_orders,
-            );
-            self.processed.drain_deltas();
-            self.processed.overdelete();
+                if weight.signum() > 0 {
+                    self.materialisation.insert(sym, fresh_fact);
+                } else {
+                    self.materialisation.remove(sym, fresh_fact);
+                }
+            });
 
-            // Rederivation is always nonrecursive, and does not require a delta program (I think).
-            let nonrecursive_delta_rederivation_join_orders = self.program_index.get_join_orders(4);
-            let recursive_delta_rederivation_join_orders = self.program_index.get_join_orders(5);
-            semi_naive_evaluation(
-                &mut self.processed,
-                &self.nonrecursive_delta_rederivation_program,
-                &self.recursive_delta_rederivation_program,
-                nonrecursive_delta_rederivation_join_orders,
-                recursive_delta_rederivation_join_orders,
-            );
-            self.processed.drain_deltas();
-            self.processed.rederive();
+        self.dbsp_runtime.dump_profile("./prof").unwrap();
 
-            self.processed.clear_prefix(OVERDELETION_PREFIX);
-            self.processed.clear_prefix(REDERIVATION_PREFIX);
-        }
-        if !self.unprocessed_insertions.is_empty() {
-            // Additions
-            self.unprocessed_insertions.drain_all_relations().for_each(
-                |(relation_symbol, unprocessed_facts)| {
-                    // We dump all unprocessed EDB relations into delta EDB relations
-                    self.processed.insert_registered(
-                        &format!("{}{}", DELTA_PREFIX, relation_symbol),
-                        unprocessed_facts.clone().into_iter(),
-                    );
-                    // And in their respective place
-                    self.processed
-                        .insert_registered(&relation_symbol, unprocessed_facts.into_iter());
-                },
-            );
-
-            let nonrecursive_delta_join_orders = self.program_index.get_join_orders(0);
-            let recursive_delta_join_orders = self.program_index.get_join_orders(1);
-            semi_naive_evaluation(
-                &mut self.processed,
-                &self.nonrecursive_delta_program,
-                &self.recursive_delta_program,
-                nonrecursive_delta_join_orders,
-                recursive_delta_join_orders,
-            );
-
-            self.processed.drain_deltas()
-        }
+        self.safe = true;
     }
-    pub fn new(program: Program) -> Self {
-        let mut processed: RelationStorage = Default::default();
-        let mut unprocessed_insertions: RelationStorage = Default::default();
-        let mut unprocessed_deletions: RelationStorage = Default::default();
 
+    pub fn new(program: Program) -> Self {
+        let mut materialisation: RelationStorage = Default::default();
         let mut relations = HashSet::new();
-        let mut delta_relations = HashSet::new();
-        let mut overdeletion_relations = HashSet::new();
-        let mut rederive_relations = HashSet::new();
+
+        let mut interner: Rodeo<Spur> = Rodeo::new();
+        let (mut dbsp_runtime, ((fact_source, fact_sink), rule_sink)) =
+            Runtime::init_circuit(1, |circuit| {
+                let (rule_source, rule_sink) =
+                    circuit.add_input_zset::<FlattenedInternedRule, Weight>();
+                let (fact_source, fact_sink) =
+                    circuit.add_input_zset::<FlattenedInternedFact, Weight>();
+
+                // (relation_symbol, terms)
+                let facts_by_relation_symbol = fact_source
+                    .index();
+
+                // (rule_id, (head, body))
+                let rules_by_id =
+                    rule_source.index_with(|(id, head, body)| (*id, (head.clone(), body.clone())));
+
+                // ((rule_id, atom_id), atom) -- this is what will "guide" iteration.
+                let iteration = rules_by_id.flat_map_index(|(rule_id, (_head, body))| {
+                    body.iter()
+                        .enumerate()
+                        .map(move |(atom_position, atom)| ((*rule_id, atom_position), atom.clone()))
+                        .collect::<Vec<_>>()
+                });
+
+                // ((rule_id, body_size), head_atom) -- this will ensure that only atoms that have been
+                // propagated through the whole body will be considered for grounding
+                let end =
+                    rule_source.index_with(|(id, head, body)| ((*id, body.len()), head.clone()));
+
+                // ((rule_id, 0), empty substitution) -- this signals the start of the computation
+                let start = rule_source.index_with(|(rule_id, _head, _body)| ((*rule_id, 0), Rewrite::default()));
+
+                let (inferences, _) = circuit
+                    .recursive(
+                        |child,
+                         (inferences, rewrites): (
+                            Stream<_, OrdIndexedZSet<usize, Vec<TypedValue>, isize>>,
+                            Stream<_, OrdIndexedZSet<(usize, usize), Rewrite, isize>>,
+                        )| {
+                            let iteration = iteration.delta0(child);
+                            let facts = facts_by_relation_symbol.delta0(child);
+                            let start = start.delta0(child);
+                            let end = end.delta0(child);
+
+                            let current_rewrites = rewrites.join_index(
+                                &iteration,
+                                |key, rewrite, current_body_atom| {
+                                    let fresh_atom = rewrite.apply(current_body_atom.1.clone());
+
+                                    if !is_ground(&fresh_atom) {
+                                        return Some((
+                                            current_body_atom.0,
+                                            (*key, fresh_atom, rewrite.clone()),
+                                        ));
+                                    }
+
+                                    return None;
+                                },
+                            );
+
+                            let cartesian_product =
+                                inferences.distinct().join_index(&current_rewrites, |_relation_symbol, fact, ((rule_id, atom_position), fresh_atom, rewrite)| {
+                                    if let Some(unification) = unify(fresh_atom, fact) {
+                                        let mut extended_sub = rewrite.clone();
+                                        extended_sub.extend(unification);
+
+                                        return Some(((*rule_id, atom_position + 1), extended_sub))
+                                    };
+
+                                    return None;
+                                });
+
+                            let fresh_facts = end
+                                .join_index(&cartesian_product, |(_rule_id, _final_atom_position), head_atom, final_substitution| {
+                                    let fresh_fact = final_substitution.clone().ground(head_atom.clone().1);
+
+                                    Some((head_atom.0, fresh_fact))
+                                });
+
+                            Ok((facts.plus(&fresh_facts), start.plus(&cartesian_product)))
+                        },
+                    )
+                    .unwrap();
+
+                Ok((((inferences.output()), fact_sink), rule_sink))
+            })
+            .unwrap();
 
         program.inner.iter().for_each(|rule| {
             relations.insert(&rule.head.symbol);
-            delta_relations.insert(format!("{}{}", DELTA_PREFIX, rule.head.symbol));
-            overdeletion_relations.insert(format!("{}{}", OVERDELETION_PREFIX, rule.head.symbol));
-            overdeletion_relations.insert(format!(
-                "{}{}{}",
-                DELTA_PREFIX, OVERDELETION_PREFIX, rule.head.symbol
-            ));
-            rederive_relations.insert(format!("{}{}", REDERIVATION_PREFIX, rule.head.symbol));
-            rederive_relations.insert(format!(
-                "{}{}{}",
-                DELTA_PREFIX, REDERIVATION_PREFIX, rule.head.symbol
-            ));
 
             rule.body.iter().for_each(|body_atom| {
                 relations.insert(&body_atom.symbol);
-                delta_relations.insert(format!("{}{}", DELTA_PREFIX, body_atom.symbol));
-                overdeletion_relations
-                    .insert(format!("{}{}", OVERDELETION_PREFIX, body_atom.symbol));
-                overdeletion_relations.insert(format!(
-                    "{}{}{}",
-                    DELTA_PREFIX, OVERDELETION_PREFIX, body_atom.symbol
-                ));
-            })
+            });
+
+            let interned_rule = reliably_intern_rule(rule.clone(), &mut interner);
+            let flattened_head = (interned_rule.head.symbol, interned_rule.head.terms);
+            let flattened_body = interned_rule
+                .body
+                .into_iter()
+                .map(|atom| (atom.symbol, atom.terms))
+                .collect();
+
+            rule_sink.push((rule.id, flattened_head, flattened_body), 1);
         });
 
         relations.iter().for_each(|relation_symbol| {
-            processed
-                .inner
-                .entry(relation_symbol.to_string())
-                .or_default();
-
-            unprocessed_insertions
-                .inner
-                .entry(relation_symbol.to_string())
-                .or_default();
-
-            unprocessed_deletions
+            materialisation
                 .inner
                 .entry(relation_symbol.to_string())
                 .or_default();
         });
 
-        delta_relations.iter().for_each(|relation_symbol| {
-            processed
-                .inner
-                .entry(relation_symbol.to_string())
-                .or_default();
-        });
-
-        overdeletion_relations.iter().for_each(|relation_symbol| {
-            processed
-                .inner
-                .entry(relation_symbol.to_string())
-                .or_default();
-        });
-
-        rederive_relations.iter().for_each(|relation_symbol| {
-            processed
-                .inner
-                .entry(relation_symbol.to_string())
-                .or_default();
-        });
-
-        let (nonrecursive_delta_program, recursive_delta_program) =
-            split_program(make_delta_program(&program, true));
-
-        let overdeletion_program = make_delta_program(&make_overdeletion_program(&program), false);
-        let (nonrecursive_delta_overdeletion_program, recursive_delta_overdeletion_program) =
-            split_program(overdeletion_program);
-
-        let rederivation_program = make_delta_program(&make_rederivation_program(&program), false);
-        let (nonrecursive_delta_rederivation_program, recursive_delta_rederivation_program) =
-            split_program(rederivation_program);
-
-        let program_index = ProgramIndex::from(vec![
-            &nonrecursive_delta_program,
-            &recursive_delta_program,
-            &nonrecursive_delta_overdeletion_program,
-            &recursive_delta_overdeletion_program,
-            &nonrecursive_delta_rederivation_program,
-            &recursive_delta_rederivation_program,
-        ]);
+        dbsp_runtime.enable_cpu_profiler().unwrap();
 
         Self {
-            processed,
-            unprocessed_insertions,
-            unprocessed_deletions,
-            program,
-            nonrecursive_delta_program,
-            recursive_delta_program,
-            nonrecursive_delta_overdeletion_program,
-            recursive_delta_overdeletion_program,
-            nonrecursive_delta_rederivation_program,
-            recursive_delta_rederivation_program,
-            program_index,
+            interner,
+            dbsp_runtime,
+            fact_source,
+            fact_sink,
+            rule_sink,
+            materialisation,
+            safe: true,
         }
     }
     pub fn safe(&self) -> bool {
-        self.unprocessed_insertions.is_empty() && self.unprocessed_deletions.is_empty()
+        self.safe
     }
 }
 
@@ -286,7 +315,8 @@ mod tests {
         // There also is a QueryBuilder, if you do not want to use a macro.
         let all_from_a = build_query!(tc("a", _));
 
-        let actual_all: HashSet<&AnonymousGroundAtom> = runtime.query(&all).unwrap().collect();
+        let actual_all: HashSet<AnonymousGroundAtom> =
+            runtime.query(&all).unwrap().cloned().collect();
         let expected_all: HashSet<AnonymousGroundAtom> = vec![
             vec!["a".into(), "b".into()],
             vec!["b".into(), "c".into()],
@@ -299,9 +329,10 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(expected_all, actual_all.into_iter().cloned().collect());
+        assert_eq!(expected_all, actual_all);
 
-        let actual_all_from_a = runtime.query(&all_from_a).unwrap();
+        let actual_all_from_a: HashSet<AnonymousGroundAtom> =
+            runtime.query(&all_from_a).unwrap().cloned().collect();
         let expected_all_from_a: HashSet<AnonymousGroundAtom> = vec![
             vec!["a".into(), "b".into()],
             vec!["a".into(), "c".into()],
@@ -309,10 +340,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(
-            expected_all_from_a,
-            actual_all_from_a.into_iter().cloned().collect()
-        );
+        assert_eq!(expected_all_from_a, actual_all_from_a);
 
         expected_all.iter().for_each(|fact| {
             assert!(runtime.contains("tc", fact).unwrap());
@@ -328,8 +356,8 @@ mod tests {
         runtime.poll();
         assert!(runtime.safe());
 
-        let actual_all_after_update: HashSet<&AnonymousGroundAtom> =
-            runtime.query(&all).unwrap().collect();
+        let actual_all_after_update: HashSet<AnonymousGroundAtom> =
+            runtime.query(&all).unwrap().cloned().collect();
         let expected_all_after_update: HashSet<AnonymousGroundAtom> = vec![
             vec!["a".into(), "b".into()],
             vec!["b".into(), "c".into()],
@@ -347,12 +375,14 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(
-            expected_all_after_update,
-            actual_all_after_update.into_iter().cloned().collect()
-        );
+        assert_eq!(expected_all_after_update, actual_all_after_update);
 
-        let actual_all_from_a_after_update = runtime.query(&all_from_a).unwrap();
+        let actual_all_from_a_after_update: HashSet<AnonymousGroundAtom> = runtime
+            .query(&all_from_a)
+            .unwrap()
+            .into_iter()
+            .cloned()
+            .collect();
         let expected_all_from_a_after_update: HashSet<AnonymousGroundAtom> = vec![
             vec!["a".into(), "b".into()],
             vec!["a".into(), "c".into()],
@@ -364,16 +394,13 @@ mod tests {
         assert_eq!(
             expected_all_from_a_after_update,
             actual_all_from_a_after_update
-                .into_iter()
-                .cloned()
-                .collect()
         );
     }
     #[test]
     fn integration_test_deletions() {
         // Queries. The explanation is in the test above
-        let all = build_query!(tc(_, _, _));
-        let all_from_a = build_query!(tc("a", _, _));
+        let all = build_query!(tc(_, _));
+        let all_from_a = build_query!(tc("a", _));
 
         let tc_program = program! {
             tc(?x, ?y) <- [e(?x, ?y)],
@@ -396,7 +423,8 @@ mod tests {
 
         runtime.poll();
 
-        let actual_all: HashSet<&AnonymousGroundAtom> = runtime.query(&all).unwrap().collect();
+        let actual_all: HashSet<AnonymousGroundAtom> =
+            runtime.query(&all).unwrap().cloned().collect();
         let expected_all: HashSet<AnonymousGroundAtom> = vec![
             vec!["a".into(), "b".into()],
             vec!["a".into(), "e".into()],
@@ -414,10 +442,15 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(expected_all, actual_all.into_iter().cloned().collect());
+        assert_eq!(expected_all, actual_all);
 
-        let actual_all_from_a = runtime.query(&all_from_a).unwrap();
-        let expected_all_from_a: HashSet<AnonymousGroundAtom> = vec![
+        let actual_all_from_a: HashSet<_> = runtime
+            .query(&all_from_a)
+            .unwrap()
+            .into_iter()
+            .cloned()
+            .collect();
+        let expected_all_from_a: HashSet<_> = vec![
             vec!["a".into(), "b".into()],
             vec!["a".into(), "c".into()],
             vec!["a".into(), "d".into()],
@@ -425,21 +458,18 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(
-            expected_all_from_a,
-            actual_all_from_a.into_iter().cloned().collect()
-        );
+        assert_eq!(expected_all_from_a, actual_all_from_a);
 
         // Update
         // Point removals are a bit annoying, since they incur creating a query.
         let d_to_e = build_query!(e("d", "e"));
-        runtime.remove(&d_to_e);
+        let deletions: Vec<_> = runtime.remove(&d_to_e).collect();
         assert!(!runtime.safe());
         runtime.poll();
         assert!(runtime.safe());
 
-        let actual_all_after_update: HashSet<&AnonymousGroundAtom> =
-            runtime.query(&all).unwrap().collect();
+        let actual_all_after_update: HashSet<AnonymousGroundAtom> =
+            runtime.query(&all).unwrap().cloned().collect();
         let expected_all_after_update: HashSet<AnonymousGroundAtom> = vec![
             vec!["a".into(), "b".into()],
             vec!["b".into(), "c".into()],
@@ -454,13 +484,15 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(
-            expected_all_after_update,
-            actual_all_after_update.into_iter().cloned().collect()
-        );
+        assert_eq!(expected_all_after_update, actual_all_after_update);
 
-        let actual_all_from_a_after_update = runtime.query(&all_from_a).unwrap();
-        let expected_all_from_a_after_update: HashSet<AnonymousGroundAtom> = vec![
+        let actual_all_from_a_after_update: HashSet<_> = runtime
+            .query(&all_from_a)
+            .unwrap()
+            .into_iter()
+            .cloned()
+            .collect();
+        let expected_all_from_a_after_update: HashSet<_> = vec![
             vec!["a".into(), "b".into()],
             vec!["a".into(), "c".into()],
             vec!["a".into(), "d".into()],
@@ -471,9 +503,6 @@ mod tests {
         assert_eq!(
             expected_all_from_a_after_update,
             actual_all_from_a_after_update
-                .into_iter()
-                .cloned()
-                .collect()
         );
     }
 }

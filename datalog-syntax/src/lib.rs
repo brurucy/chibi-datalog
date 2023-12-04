@@ -1,12 +1,14 @@
 use ordered_float::OrderedFloat;
+use rkyv::{Archive, Deserialize, Serialize};
+use size_of::SizeOf;
 use std::fmt::{Debug, Formatter};
 
-#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Hash)]
+#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Hash, Archive, Serialize, Deserialize, SizeOf)]
 pub enum TypedValue {
     Str(String),
     Int(usize),
     Bool(bool),
-    Float(OrderedFloat<f64>),
+    //Float(OrderedFloat<f64>),
 }
 
 impl Debug for TypedValue {
@@ -15,7 +17,7 @@ impl Debug for TypedValue {
             TypedValue::Str(x) => x.fmt(f),
             TypedValue::Int(x) => x.fmt(f),
             TypedValue::Bool(x) => x.fmt(f),
-            TypedValue::Float(x) => x.fmt(f),
+            //      TypedValue::Float(x) => x.fmt(f),
         }
     }
 }
@@ -44,11 +46,11 @@ impl From<bool> for TypedValue {
     }
 }
 
-impl From<f64> for TypedValue {
+/*impl From<f64> for TypedValue {
     fn from(value: f64) -> Self {
         TypedValue::Float(OrderedFloat::from(value))
     }
-}
+}*/
 
 pub type Variable = String;
 
