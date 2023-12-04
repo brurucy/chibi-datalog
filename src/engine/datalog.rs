@@ -160,11 +160,11 @@ impl ChibiRuntime {
                 let (fact_source, fact_sink) =
                     circuit.add_input_zset::<FlattenedInternedFact, Weight>();
 
-                // (relation_symbol, terms)
+                // (relation_symbol, terms) <- (relation_symbol, terms)
                 let facts_by_relation_symbol = fact_source
                     .index();
 
-                // (rule_id, (head, body))
+                // (rule_id, (head, body)) <- (rule_id, head, body)
                 let rules_by_id =
                     rule_source.index_with(|(id, head, body)| (*id, (head.clone(), body.clone())));
 
