@@ -188,7 +188,7 @@ impl ChibiRuntime {
 
         let mut interner: Rodeo<Spur> = Rodeo::new();
         let (mut dbsp_runtime, ((fact_source, fact_sink), rule_sink)) =
-            Runtime::init_circuit(8, |circuit| {
+            Runtime::init_circuit(1, |circuit| {
                 let (rule_source, rule_sink) =
                     circuit.add_input_zset::<FlattenedInternedRule, Weight>();
                 let (fact_source, fact_sink) =
