@@ -160,9 +160,7 @@ impl ChibiRuntime {
             .filter(|fact| pattern_match(query, fact)));
     }
     pub fn poll(&mut self) {
-        let now = Instant::now();
         self.dbsp_runtime.step().unwrap();
-        println!("{}", now.elapsed().as_millis());
 
         let consolidated = self.fact_source.consolidate();
         consolidated
@@ -190,11 +188,13 @@ impl ChibiRuntime {
 
         let mut interner: Rodeo<Spur> = Rodeo::new();
         let (mut dbsp_runtime, ((fact_source, fact_sink), rule_sink)) =
-            Runtime::init_circuit(1, |circuit| {
+            Runtime::init_circuit(8, |circuit| {
                 let (rule_source, rule_sink) =
                     circuit.add_input_zset::<FlattenedInternedRule, Weight>();
                 let (fact_source, fact_sink) =
                     circuit.add_input_zset::<FlattenedInternedFact, Weight>();
+
+                let facts_by_symbol = fact_source.index();
 
                 // tc(?x, ?z) <- e(?x, ?y), tc(?y, ?z)
                 // --   cartesian stupid way   - indexes by symbol
@@ -206,8 +206,6 @@ impl ChibiRuntime {
                 // --   index_with(e, [1, 0]) >< filter(facts, tc)
                 let unique_column_sets = rule_source
                     .flat_map_index(compute_unique_column_sets);
-
-                let facts_by_symbol = fact_source.index();
 
                 // (relation_symbol, terms) <- (relation_symbol, terms)
                 let fact_index = fact_source
@@ -252,21 +250,21 @@ impl ChibiRuntime {
                         )| {
                             let iteration = iteration.delta0(child);
                             let edb_index = fact_index.delta0(child);
-                            let edb = facts_by_symbol.delta0(child);
                             let start = start.delta0(child);
                             let end_for_grounding = end_for_grounding.delta0(child);
                             let unique_column_sets = unique_column_sets.delta0(child);
+                            let edb = facts_by_symbol.delta0(child);
 
                             let current_rewrites = rewrites.join_index(
                                 &iteration,
                                 |key, rewrite, current_body_atom| {
                                     let fresh_atom = rewrite.apply(current_body_atom.1.clone());
 
-                                    let mut mask = vec![];
-                                    fresh_atom.iter().for_each(|term| {
+                                    let mut mask = vec![None; fresh_atom.len()];
+                                    fresh_atom.iter().enumerate().for_each(|(idx,term)| {
                                         match term {
                                             InternedTerm::Constant(inner) => {
-                                                mask.push(Some(inner.clone()))
+                                                mask[idx] = Some(inner.clone())
                                             },
                                             _ => {}
                                         }
@@ -299,7 +297,6 @@ impl ChibiRuntime {
                             let fresh_facts = end_for_grounding
                                 .join_index(&cartesian_product, |(_rule_id, _final_atom_position), (head_atom_symbol, head_atom), final_substitution| {
                                     let fresh_fact = final_substitution.clone().ground(head_atom.clone());
-
                                     Some((*head_atom_symbol, fresh_fact))
                                 });
 
