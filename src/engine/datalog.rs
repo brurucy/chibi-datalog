@@ -1,11 +1,12 @@
-use crate::engine::rewrite::{reliably_intern_rule, unify, InternedTerm, Rewrite};
+use crate::engine::rewrite::{reliably_intern_rule, unify, InternedRule, InternedTerm, Rewrite};
 use crate::engine::storage::RelationStorage;
 use crate::evaluation::query::pattern_match;
 use datalog_syntax::*;
 use dbsp::operator::FilterMap;
 use dbsp::profile::Profiler;
 use dbsp::{
-    CollectionHandle, DBSPHandle, IndexedZSet, OrdIndexedZSet, OutputHandle, Runtime, Stream,
+    Circuit, CollectionHandle, DBSPHandle, IndexedZSet, OrdIndexedZSet, OutputHandle, Runtime,
+    Stream,
 };
 use lasso::{Key, Rodeo, Spur};
 use std::collections::HashSet;
@@ -26,6 +27,41 @@ pub struct ChibiRuntime {
     materialisation: RelationStorage,
     safe: bool,
 }
+
+pub fn compute_unique_column_sets(rule: &FlattenedInternedRule) -> Vec<(usize, Vec<usize>)> {
+    let mut out = vec![];
+    let mut variables: HashSet<usize> = Default::default();
+    let mut fresh_variables: HashSet<usize> = Default::default();
+    for body_atom in &rule.2 {
+        let index: Vec<_> = body_atom
+            .1
+            .iter()
+            .enumerate()
+            .flat_map(|(idx, term)| match term {
+                InternedTerm::Variable(inner) => {
+                    if !variables.contains(inner) {
+                        fresh_variables.insert(*inner);
+                        None
+                    } else {
+                        Some(idx)
+                    }
+                }
+                InternedTerm::Constant(_) => Some(idx),
+            })
+            .collect();
+        variables.extend(fresh_variables.iter());
+        out.push((body_atom.0, index));
+
+        fresh_variables.clear();
+    }
+
+    return out;
+}
+
+// tc(?x, ?z) <- e(?x, ?y), tc(?y, ?z)
+// [(e, (tc, [1, 0]))]
+// T(?z, 0, ?y) <- T(?x, 1, ?y), T(?z, 0, ?x),
+// [(t, (t, [2, 1, 0])]
 
 struct SliceDisplay<'a, T: 'a>(&'a [T]);
 
@@ -160,9 +196,32 @@ impl ChibiRuntime {
                 let (fact_source, fact_sink) =
                     circuit.add_input_zset::<FlattenedInternedFact, Weight>();
 
+                // tc(?x, ?z) <- e(?x, ?y), tc(?y, ?z)
+                // --   cartesian stupid way   - indexes by symbol
+                // ---- e, tc
+                // --   demand-driven indexing - indexes by symbol, unique column combination, values, matches
+                // ---- e : [], tc: [0 : [ ... ]]
+                // --   relational datalog     - indexes by symbol, join key
+                // ---- e : (tc, [1, 0]), tc: []
+                // --   index_with(e, [1, 0]) >< filter(facts, tc)
+                let unique_column_sets = rule_source
+                    .flat_map_index(compute_unique_column_sets);
+
+                let facts_by_symbol = fact_source.index();
+
                 // (relation_symbol, terms) <- (relation_symbol, terms)
-                let facts_by_relation_symbol = fact_source
-                    .index();
+                let fact_index = fact_source
+                    .index()
+                    .join_index(&unique_column_sets, |relation_symbol, fact, column_set| {
+                        let mut projected_fact = vec![None; fact.len()];
+                        if !(column_set.len() == 0) {
+                            column_set.iter().for_each(|column| {
+                                projected_fact[*column] = Some(fact[*column].clone())
+                            });
+                        }
+
+                        Some(((*relation_symbol, projected_fact), fact.clone()))
+                    });
 
                 // (rule_id, (head, body)) <- (rule_id, head, body)
                 let rules_by_id =
@@ -178,32 +237,45 @@ impl ChibiRuntime {
 
                 // ((rule_id, body_size), head_atom) -- this will ensure that only atoms that have been
                 // propagated through the whole body will be considered for grounding
-                let end =
-                    rule_source.index_with(|(id, head, body)| ((*id, body.len()), head.clone()));
+                let end_for_grounding = rule_source.index_with(|(id, head, body)| ((*id, body.len()), head.clone()));
 
                 // ((rule_id, 0), empty substitution) -- this signals the start of the computation
                 let start = rule_source.index_with(|(rule_id, _head, _body)| ((*rule_id, 0), Rewrite::default()));
 
-                let (inferences, _) = circuit
+                let (inferences, _, _) = circuit
                     .recursive(
                         |child,
-                         (inferences, rewrites): (
-                            Stream<_, OrdIndexedZSet<usize, Vec<TypedValue>, isize>>,
-                            Stream<_, OrdIndexedZSet<(usize, usize), Rewrite, isize>>,
+                        (idb, idb_index, rewrites): (
+                             Stream<_, OrdIndexedZSet<usize, Vec<TypedValue>, isize>>,
+                             Stream<_, OrdIndexedZSet<(usize, Vec<Option<TypedValue>>), Vec<TypedValue>, isize>>,
+                             Stream<_, OrdIndexedZSet<(usize, usize), Rewrite, isize>>,
                         )| {
                             let iteration = iteration.delta0(child);
-                            let facts = facts_by_relation_symbol.delta0(child);
+                            let edb_index = fact_index.delta0(child);
+                            let edb = facts_by_symbol.delta0(child);
                             let start = start.delta0(child);
-                            let end = end.delta0(child);
+                            let end_for_grounding = end_for_grounding.delta0(child);
+                            let unique_column_sets = unique_column_sets.delta0(child);
 
                             let current_rewrites = rewrites.join_index(
                                 &iteration,
                                 |key, rewrite, current_body_atom| {
                                     let fresh_atom = rewrite.apply(current_body_atom.1.clone());
 
+                                    let mut mask = vec![];
+                                    fresh_atom.iter().for_each(|term| {
+                                        match term {
+                                            InternedTerm::Constant(inner) => {
+                                                mask.push(Some(inner.clone()))
+                                            },
+                                            _ => {}
+                                        }
+                                    });
+
+
                                     if !is_ground(&fresh_atom) {
                                         return Some((
-                                            current_body_atom.0,
+                                            (current_body_atom.0, mask),
                                             (*key, fresh_atom, rewrite.clone()),
                                         ));
                                     }
@@ -213,7 +285,7 @@ impl ChibiRuntime {
                             );
 
                             let cartesian_product =
-                                inferences.distinct().join_index(&current_rewrites, |_relation_symbol, fact, ((rule_id, atom_position), fresh_atom, rewrite)| {
+                                idb_index.join_index(&current_rewrites, |(_relation_symbol, _projection), fact, ((rule_id, atom_position), fresh_atom, rewrite)| {
                                     if let Some(unification) = unify(fresh_atom, fact) {
                                         let mut extended_sub = rewrite.clone();
                                         extended_sub.extend(unification);
@@ -224,14 +296,27 @@ impl ChibiRuntime {
                                     return None;
                                 });
 
-                            let fresh_facts = end
-                                .join_index(&cartesian_product, |(_rule_id, _final_atom_position), head_atom, final_substitution| {
-                                    let fresh_fact = final_substitution.clone().ground(head_atom.clone().1);
+                            let fresh_facts = end_for_grounding
+                                .join_index(&cartesian_product, |(_rule_id, _final_atom_position), (head_atom_symbol, head_atom), final_substitution| {
+                                    let fresh_fact = final_substitution.clone().ground(head_atom.clone());
 
-                                    Some((head_atom.0, fresh_fact))
+                                    Some((*head_atom_symbol, fresh_fact))
                                 });
 
-                            Ok((facts.plus(&fresh_facts), start.plus(&cartesian_product)))
+
+                            let fresh_projections = fresh_facts
+                                .join_index(&unique_column_sets, |relation_symbol, fact, column_set| {
+                                    let mut projected_fact = vec![None; fact.len()];
+                                    if !(column_set.len() == 0) {
+                                        column_set.iter().for_each(|column| {
+                                            projected_fact[*column] = Some(fact[*column].clone())
+                                        });
+                                    }
+
+                                    Some(((*relation_symbol, projected_fact), fact.clone()))
+                                });
+
+                            Ok((edb.plus(&fresh_facts), edb_index.plus(&fresh_projections), start.plus(&cartesian_product)))
                         },
                     )
                     .unwrap();
