@@ -16,7 +16,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 lazy_static! {
-    static ref FACT_REGISTRY: DashMap<usize, Vec<TypedValue>> = DashMap::new();
+    //static ref FACT_REGISTRY: DashMap<usize, Vec<TypedValue>> = DashMap::new();
+    static ref FACT_REGISTRY: sharded_slab::Slab<Vec<TypedValue>> = sharded_slab::Slab::new();
 }
 
 pub type FlattenedInternedFact = (usize, Vec<TypedValue>);
@@ -211,10 +212,9 @@ impl ChibiRuntime {
 
                 let facts_by_symbol = fact_source
                     .index_with(move |(symbol, fact)| {
-                        let fact_hash = FACT_REGISTRY.hash_usize(fact);
-                        FACT_REGISTRY.insert(fact_hash, fact.clone());
+                        let fact_registration = FACT_REGISTRY.insert(fact.clone()).unwrap();
 
-                        (*symbol, fact_hash)
+                        (*symbol, fact_registration)
                     });
 
                 // tc(?x, ?z) <- e(?x, ?y), tc(?y, ?z)
@@ -230,7 +230,7 @@ impl ChibiRuntime {
                 // (relation_symbol, terms) <- (relation_symbol, terms)
                 let fact_index = facts_by_symbol
                     .join_index(&unique_column_sets, |relation_symbol, fact_registration, column_set| {
-                        let fact = FACT_REGISTRY.get(fact_registration).unwrap();
+                        let fact = FACT_REGISTRY.get(*fact_registration).unwrap();
 
                         let mut projected_fact = vec![None; fact.len()];
                         if !(column_set.len() == 0) {
@@ -305,7 +305,7 @@ impl ChibiRuntime {
 
                             let cartesian_product =
                                 idb_index.join_index(&current_rewrites, |(_relation_symbol, _projection), fact_registration, ((rule_id, atom_position), fresh_atom, rewrite)| {
-                                    let fact = FACT_REGISTRY.get(fact_registration).unwrap();
+                                    let fact = FACT_REGISTRY.get(*fact_registration).unwrap();
 
                                     if let Some(unification) = unify(fresh_atom, &fact) {
                                         let mut extended_sub = rewrite.clone();
@@ -320,16 +320,15 @@ impl ChibiRuntime {
                             let fresh_facts = end_for_grounding
                                 .join_index(&cartesian_product, |(_rule_id, _final_atom_position), (head_atom_symbol, head_atom), final_substitution| {
                                     let fresh_fact = final_substitution.clone().ground(head_atom.clone());
-                                    let fresh_fact_registration = FACT_REGISTRY.hash_usize(&fresh_fact);
-                                    FACT_REGISTRY.insert(fresh_fact_registration, fresh_fact);
+                                    let fresh_fact_registration = FACT_REGISTRY.insert(fresh_fact);
 
-                                    Some((*head_atom_symbol, fresh_fact_registration))
+                                    Some((*head_atom_symbol, fresh_fact_registration.unwrap()))
                                 });
 
 
                             let fresh_projections = fresh_facts
                                 .join_index(&unique_column_sets, |relation_symbol, fact_registration, column_set| {
-                                    let fact = FACT_REGISTRY.get(fact_registration).unwrap();
+                                    let fact = FACT_REGISTRY.get(*fact_registration).unwrap();
 
                                     let mut projected_fact = vec![None; fact.len()];
                                     if !(column_set.len() == 0) {
@@ -346,7 +345,7 @@ impl ChibiRuntime {
                     )
                     .unwrap();
 
-                let inferences = inferences.map_index(|(key, value)| (*key, FACT_REGISTRY.get(value).unwrap().clone()));
+                let inferences = inferences.map_index(|(key, value)| (*key, FACT_REGISTRY.get(*value).unwrap().clone()));
 
                 Ok((((inferences.output()), fact_sink), rule_sink))
             })
