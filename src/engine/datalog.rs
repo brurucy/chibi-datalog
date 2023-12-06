@@ -1,17 +1,17 @@
-use crate::engine::rewrite::{reliably_intern_rule, unify, InternedRule, InternedTerm, Rewrite};
+use crate::engine::rewrite::{reliably_intern_rule, unify, InternedTerm, Rewrite};
 use crate::engine::storage::RelationStorage;
 use crate::evaluation::query::pattern_match;
+use crate::interning::fact_registry::Row;
+use ahash::AHasher;
 use datalog_syntax::*;
 use dbsp::operator::FilterMap;
-use dbsp::profile::Profiler;
 use dbsp::{
-    Circuit, CollectionHandle, DBSPHandle, IndexedZSet, OrdIndexedZSet, OutputHandle, Runtime,
-    Stream,
+    CollectionHandle, DBSPHandle, IndexedZSet, OrdIndexedZSet, OutputHandle, Runtime, Stream,
 };
 use lasso::{Key, Rodeo, Spur};
 use std::collections::HashSet;
 use std::fmt;
-use std::time::Instant;
+use std::hash::{Hash, Hasher};
 
 pub type FlattenedInternedFact = (usize, Vec<TypedValue>);
 pub type FlattenedInternedAtom = (usize, Vec<InternedTerm>);
@@ -26,6 +26,15 @@ pub struct ChibiRuntime {
     fact_source: OutputHandle<OrdIndexedZSet<usize, Vec<TypedValue>, Weight>>,
     materialisation: RelationStorage,
     safe: bool,
+}
+
+fn hashisher<T: Hash>(key: &[T]) -> Row {
+    let mut hasher = AHasher::default();
+
+    key.iter()
+        .for_each(|masked_value| masked_value.hash(&mut hasher));
+
+    Row(hasher.finish())
 }
 
 pub fn compute_unique_column_sets(rule: &FlattenedInternedRule) -> Vec<(usize, Vec<usize>)> {
@@ -188,7 +197,7 @@ impl ChibiRuntime {
 
         let mut interner: Rodeo<Spur> = Rodeo::new();
         let (mut dbsp_runtime, ((fact_source, fact_sink), rule_sink)) =
-            Runtime::init_circuit(1, |circuit| {
+            Runtime::init_circuit(8, |circuit| {
                 let (rule_source, rule_sink) =
                     circuit.add_input_zset::<FlattenedInternedRule, Weight>();
                 let (fact_source, fact_sink) =
@@ -207,6 +216,9 @@ impl ChibiRuntime {
                 let unique_column_sets = rule_source
                     .flat_map_index(compute_unique_column_sets);
 
+                /*let hashed_facts_and_facts_by_symbol = fact_source
+                    .index_with(|(fact_symbol, fact)| (*fact_symbol, (hashisher(fact), fact.clone())));
+*/
                 // (relation_symbol, terms) <- (relation_symbol, terms)
                 let fact_index = fact_source
                     .index()

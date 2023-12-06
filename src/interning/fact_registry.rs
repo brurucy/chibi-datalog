@@ -1,9 +1,24 @@
 use ahash::{AHashMap, AHasher};
 use datalog_syntax::AnonymousGroundAtom;
+use rkyv::{Archive, Deserialize, Serialize};
+use size_of::SizeOf;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(
+    Copy,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    Archive,
+    SizeOf,
+)]
 pub struct Row(pub u64);
 
 fn hashisher(key: &AnonymousGroundAtom) -> Row {
