@@ -305,12 +305,14 @@ dependencies = [
  "dbsp",
  "indexmap 2.1.0",
  "lasso",
+ "lazy_static",
  "ordered-float",
  "phf",
  "pretty_assertions",
  "rayon",
  "regex",
  "rkyv",
+ "sharded-slab",
  "size-of",
 ]
 
