@@ -5,47 +5,47 @@ use std::fmt::{Debug, Formatter};
 
 #[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Hash, Archive, Serialize, Deserialize, SizeOf)]
 pub enum TypedValue {
-    Str(String),
+    //Str(String),
     Int(usize),
-    Bool(bool),
+    //Bool(bool),
     //Float(OrderedFloat<f64>),
 }
 
 impl Debug for TypedValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypedValue::Str(x) => x.fmt(f),
+            // TypedValue::Str(x) => x.fmt(f),
             TypedValue::Int(x) => x.fmt(f),
-            TypedValue::Bool(x) => x.fmt(f),
-            //      TypedValue::Float(x) => x.fmt(f),
+            // TypedValue::Bool(x) => x.fmt(f),
+            // TypedValue::Float(x) => x.fmt(f),
         }
     }
 }
 
-impl From<String> for TypedValue {
+/*impl From<String> for TypedValue {
     fn from(value: String) -> Self {
         TypedValue::Str(value)
     }
-}
+}*/
 
-impl From<&str> for TypedValue {
+/*impl From<&str> for TypedValue {
     fn from(value: &str) -> Self {
         TypedValue::Str(value.to_string())
     }
 }
-
+*/
 impl From<usize> for TypedValue {
     fn from(value: usize) -> Self {
         TypedValue::Int(value)
     }
 }
 
-impl From<bool> for TypedValue {
+/*impl From<bool> for TypedValue {
     fn from(value: bool) -> Self {
         TypedValue::Bool(value)
     }
 }
-
+*/
 /*impl From<f64> for TypedValue {
     fn from(value: f64) -> Self {
         TypedValue::Float(OrderedFloat::from(value))

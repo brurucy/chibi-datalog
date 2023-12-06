@@ -213,8 +213,7 @@ impl ChibiRuntime {
                 // --   relational datalog     - indexes by symbol, join key
                 // ---- e : (tc, [1, 0]), tc: []
                 // --   index_with(e, [1, 0]) >< filter(facts, tc)
-                let unique_column_sets = rule_source
-                    .flat_map_index(compute_unique_column_sets);
+                let unique_column_sets = rule_source.flat_map_index(compute_unique_column_sets);
 
                 /*let hashed_facts_and_facts_by_symbol = fact_source
                     .index_with(|(fact_symbol, fact)| (*fact_symbol, (hashisher(fact), fact.clone())));
@@ -230,7 +229,7 @@ impl ChibiRuntime {
                             });
                         }
 
-                        Some(((*relation_symbol, projected_fact), fact.clone()))
+                        Some(((*relation_symbol, hashisher(&projected_fact)), fact.clone()))
                     });
 
                 // (rule_id, (head, body)) <- (rule_id, head, body)
@@ -257,7 +256,7 @@ impl ChibiRuntime {
                         |child,
                         (idb, idb_index, rewrites): (
                              Stream<_, OrdIndexedZSet<usize, Vec<TypedValue>, isize>>,
-                             Stream<_, OrdIndexedZSet<(usize, Vec<Option<TypedValue>>), Vec<TypedValue>, isize>>,
+                             Stream<_, OrdIndexedZSet<(usize, Row), Vec<TypedValue>, isize>>,
                              Stream<_, OrdIndexedZSet<(usize, usize), Rewrite, isize>>,
                         )| {
                             let iteration = iteration.delta0(child);
@@ -285,7 +284,7 @@ impl ChibiRuntime {
 
                                     if !is_ground(&fresh_atom) {
                                         return Some((
-                                            (current_body_atom.0, mask),
+                                            (current_body_atom.0, hashisher(&mask)),
                                             (*key, fresh_atom, rewrite.clone()),
                                         ));
                                     }
@@ -322,7 +321,7 @@ impl ChibiRuntime {
                                         });
                                     }
 
-                                    Some(((*relation_symbol, projected_fact), fact.clone()))
+                                    Some(((*relation_symbol, hashisher(&projected_fact)), fact.clone()))
                                 });
 
                             Ok((edb.plus(&fresh_facts), edb_index.plus(&fresh_projections), start.plus(&cartesian_product)))
